@@ -3859,9 +3859,10 @@ void App::loadOrders() {
         if (tr->isWatchingForSpentDeposit())
             watchForSpentDeposit(tr);
 
-        // Restore pending partial orders
-        if (tr->isOrderPending())
-            m_partialOrders.push_back(tr);
+        // Restore pending partial orders // WHY ?! 
+        // testing fix for problem with blocknet loading ancient cancelled orders at 'open' stage at wallet restart.
+        //if (tr->isOrderPending())
+        //    m_partialOrders.push_back(tr);
     }
 }
 
