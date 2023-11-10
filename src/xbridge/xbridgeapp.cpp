@@ -3852,14 +3852,15 @@ void App::loadOrders() {
         // Restore all transactions
         if (tr->state == TransactionDescr::trCancelled || tr->state == TransactionDescr::trFinished || tr->isHistorical())
             m_p->m_historicTransactions.insert(std::make_pair(tr->id, tr));
-        else
-            m_p->m_transactions.insert(std::make_pair(tr->id, tr));
+        
+        // testing fix for problem with blocknet loading ancient cancelled orders at 'open' stage at wallet restart.
+        //else
+        //    m_p->m_transactions.insert(std::make_pair(tr->id, tr));
 
         // Restore spent deposit watches
         if (tr->isWatchingForSpentDeposit())
             watchForSpentDeposit(tr);
 
-        // Restore pending partial orders
         if (tr->isOrderPending())
             m_partialOrders.push_back(tr);
     }
