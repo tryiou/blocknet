@@ -55,6 +55,13 @@ jobs:
             blocknet/depends
           key: gitian-cache-${{ github.ref_name }}-${{ hashFiles('blocknet/depends/*.mk') }}
 
+      - name: Install apt-cacher-ng
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-cacher-ng
+          sudo sed -i 's/^#port: 3142/port: 3142/' /etc/apt-cacher-ng/acng.conf || true
+          sudo systemctl enable apt-cacher-ng
+
       - name: Start apt-cacher-ng
         run: |
           sudo systemctl start apt-cacher-ng
@@ -62,9 +69,9 @@ jobs:
 
       - name: Prepare Gitian
         run: |
-            export MIRROR_HOST=""                                                                                                                                 
-            blocknet/contrib/gitian-build.py --setup --docker --commit dummy ${{ github.ref_name }} --url https://github.com/${{ github.repository }}   
-            
+            export MIRROR_HOST="http://archive.ubuntu.com/ubuntu"
+            blocknet/contrib/gitian-build.py --setup --docker --commit dummy ${{ github.ref_name }} --url https://github.com/${{ github.repository }}
+
       - name: Run Gitian build
         run: |
           export GPG_TTY=$(tty)
@@ -145,6 +152,13 @@ jobs:
             blocknet/depends
           key: gitian-cache-${{ github.ref_name }}-${{ hashFiles('blocknet/depends/*.mk') }}
 
+      - name: Install apt-cacher-ng
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-cacher-ng
+          sudo sed -i 's/^#port: 3142/port: 3142/' /etc/apt-cacher-ng/acng.conf || true
+          sudo systemctl enable apt-cacher-ng
+
       - name: Start apt-cacher-ng
         run: |
           sudo systemctl start apt-cacher-ng
@@ -152,9 +166,9 @@ jobs:
 
       - name: Prepare Gitian
         run: |
-            export MIRROR_HOST=""                                                                                                                                 
-            blocknet/contrib/gitian-build.py --setup --docker --commit dummy ${{ github.ref_name }} --url https://github.com/${{ github.repository }}   
-            
+            export MIRROR_HOST="http://archive.ubuntu.com/ubuntu"
+            blocknet/contrib/gitian-build.py --setup --docker --commit dummy ${{ github.ref_name }} --url https://github.com/${{ github.repository }}
+
       - name: Run Gitian build
         run: |
           export GPG_TTY=$(tty)
@@ -210,6 +224,13 @@ jobs:
             blocknet/depends
           key: gitian-cache-${{ github.ref_name }}-${{ hashFiles('blocknet/depends/*.mk') }}
 
+      - name: Install apt-cacher-ng
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-cacher-ng
+          sudo sed -i 's/^#port: 3142/port: 3142/' /etc/apt-cacher-ng/acng.conf || true
+          sudo systemctl enable apt-cacher-ng
+
       - name: Start apt-cacher-ng
         run: |
           sudo systemctl start apt-cacher-ng
@@ -217,9 +238,9 @@ jobs:
 
       - name: Prepare Gitian
         run: |
-            export MIRROR_HOST=""                                                                                                                                 
-            blocknet/contrib/gitian-build.py --setup --docker --commit dummy ${{ github.ref_name }} --url https://github.com/${{ github.repository }}   
-            
+            export MIRROR_HOST="http://archive.ubuntu.com/ubuntu"
+            blocknet/contrib/gitian-build.py --setup --docker --commit dummy ${{ github.ref_name }} --url https://github.com/${{ github.repository }}
+
       - name: Run Gitian build
         run: |
           export GPG_TTY=$(tty)
