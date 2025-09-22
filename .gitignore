@@ -139,3 +139,5 @@ db4/
 .idea/
 cmake-build-debug/
 CMakeLists.txt
+.aider*
+.env
