@@ -4,6 +4,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 
 def setup():
     global args, workdir
@@ -43,6 +44,18 @@ def setup():
         print('Reboot is required')
         exit(0)
 
+
+def download_with_retry(url, dest, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            subprocess.check_call(['wget', '--no-check-certificate', '-N', '-P', dest, url])
+            return True
+        except subprocess.CalledProcessError:
+            if attempt < max_retries - 1:
+                time.sleep(60)  # Wait 5 seconds before retry
+                continue
+            return False
+
 def build():
     global args, workdir
 
@@ -51,8 +64,14 @@ def build():
     os.chdir('gitian-builder')
     os.makedirs('inputs', exist_ok=True)
 
-    subprocess.check_call(['wget', '--no-check-certificate', '-N', '-P', 'inputs', 'https://raw.githubusercontent.com/blocknetdx/blocknet-build/master/osslsigncode-1.7.1.tar.gz'])
-    subprocess.check_call(['wget', '--no-check-certificate', '-N', '-P', 'inputs', 'https://raw.githubusercontent.com/blocknetdx/blocknet-build/master/osslsigncode-Backports-to-1.7.1.patch'])
+
+    
+    if not download_with_retry('https://raw.githubusercontent.com/blocknetdx/blocknet-build/master/osslsigncode-1.7.1.tar.gz', 'inputs'):
+        print('Failed to download osslsigncode-1.7.1.tar.gz after multiple attempts', file=sys.stderr)
+        exit(1)
+    if not download_with_retry('https://raw.githubusercontent.com/blocknetdx/blocknet-build/master/osslsigncode-Backports-to-1.7.1.patch', 'inputs'):
+        print('Failed to download osslsigncode-Backports-to-1.7.1.patch after multiple attempts', file=sys.stderr)
+        exit(1)
     subprocess.check_call(["echo 'a8c4e9cafba922f89de0df1f2152e7be286aba73f78505169bc351a7938dd911 inputs/osslsigncode-Backports-to-1.7.1.patch' | sha256sum -c"], shell=True)
     subprocess.check_call(["echo 'f9a8cdb38b9c309326764ebc937cba1523a3a751a7ab05df3ecc99d18ae466c9 inputs/osslsigncode-1.7.1.tar.gz' | sha256sum -c"], shell=True)
     subprocess.check_call(['make', '-C', '../blocknet/depends', 'download', 'SOURCES_PATH=' + os.getcwd() + '/cache/common'])
