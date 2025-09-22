@@ -47,6 +47,19 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Cache Gitian inputs and depends
+        uses: actions/cache@v4
+        with:
+          path: |
+            gitian-builder/inputs
+            blocknet/depends
+          key: gitian-cache-${{ github.ref_name }}-${{ hashFiles('blocknet/depends/*.mk') }}
+
+      - name: Start apt-cacher-ng
+        run: |
+          sudo systemctl start apt-cacher-ng
+          sudo systemctl status apt-cacher-ng
+
       - name: Prepare Gitian
         run: |
             export MIRROR_HOST=""                                                                                                                                 
@@ -55,6 +68,7 @@ jobs:
       - name: Run Gitian build
         run: |
           export GPG_TTY=$(tty)
+          export MIRROR_HOST="http://archive.ubuntu.com/ubuntu"
           blocknet/contrib/gitian-build.py --build --docker --detach-sign --no-commit --os l --jobs $(nproc) --memory `awk '/^Mem/ {print $7}' <(free -m)` --url https://github.com/${{ github.repository }} --commit dummy ${{ github.ref_name }}
 
       - name: Release to Github
@@ -123,6 +137,19 @@ jobs:
           repository: blocknetdx/gitian.sigs
           path: gitian.sigs
 
+      - name: Cache Gitian inputs and depends
+        uses: actions/cache@v4
+        with:
+          path: |
+            gitian-builder/inputs
+            blocknet/depends
+          key: gitian-cache-${{ github.ref_name }}-${{ hashFiles('blocknet/depends/*.mk') }}
+
+      - name: Start apt-cacher-ng
+        run: |
+          sudo systemctl start apt-cacher-ng
+          sudo systemctl status apt-cacher-ng
+
       - name: Prepare Gitian
         run: |
             export MIRROR_HOST=""                                                                                                                                 
@@ -131,6 +158,7 @@ jobs:
       - name: Run Gitian build
         run: |
           export GPG_TTY=$(tty)
+          export MIRROR_HOST="http://archive.ubuntu.com/ubuntu"
           blocknet/contrib/gitian-build.py --build --docker --detach-sign --no-commit --os w --jobs $(nproc) --memory `awk '/^Mem/ {print $7}' <(free -m)` --url https://github.com/${{ github.repository }} --commit dummy ${{ github.ref_name }}
 
       - name: Release to Github
@@ -174,6 +202,19 @@ jobs:
       - name: Download macOS Xcode dependencies
         run: wget -P gitian-builder/inputs https://bitcoincore.org/depends-sources/sdks/MacOSX10.11.sdk.tar.gz
 
+      - name: Cache Gitian inputs and depends
+        uses: actions/cache@v4
+        with:
+          path: |
+            gitian-builder/inputs
+            blocknet/depends
+          key: gitian-cache-${{ github.ref_name }}-${{ hashFiles('blocknet/depends/*.mk') }}
+
+      - name: Start apt-cacher-ng
+        run: |
+          sudo systemctl start apt-cacher-ng
+          sudo systemctl status apt-cacher-ng
+
       - name: Prepare Gitian
         run: |
             export MIRROR_HOST=""                                                                                                                                 
@@ -182,6 +223,7 @@ jobs:
       - name: Run Gitian build
         run: |
           export GPG_TTY=$(tty)
+          export MIRROR_HOST="http://archive.ubuntu.com/ubuntu"
           blocknet/contrib/gitian-build.py --build --docker --detach-sign --no-commit --os m --jobs $(nproc) --memory `awk '/^Mem/ {print $7}' <(free -m)` --url https://github.com/${{ github.repository }} --commit dummy ${{ github.ref_name }}
 
       - name: Release to Github

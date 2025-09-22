@@ -28,7 +28,9 @@ script: |
 
   # Add Ubuntu 20.04 repository which has GCC-8 packages
   echo "deb http://archive.ubuntu.com/ubuntu/ focal main universe" | sudo tee /etc/apt/sources.list.d/focal.list
-  sudo apt-get update
+  # APT config for retries and timeouts
+  echo 'Acquire::http::Dl-Limit "0"; Acquire::Retries "3"; Acquire::http::Timeout "30"; Acquire::ftp::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99retry
+  sudo apt-get update -o Acquire::http::Dl-Limit=0 -o Acquire::Retries=3
           
   # Pin the focal repository to a lower priority
   echo "Package: *" | sudo tee /etc/apt/preferences.d/focal-pin
