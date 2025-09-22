@@ -46,7 +46,7 @@ jobs:
           mkdir -p $DISTDIR
           make install DESTDIR=$DISTDIR
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: artifacts-linux
           path: |
@@ -88,7 +88,7 @@ jobs:
           make install DESTDIR=$DISTDIR
           cp *win64-setup.exe $DISTDIR/bin/blocknet-win64-setup.exe
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: artifacts-win
           path: |
@@ -129,7 +129,7 @@ jobs:
           mkdir -p $DISTDIR/bin && llvm-dsymutil-6.0 src/qt/blocknet-qt -o $DISTDIR/bin/blocknet-qt.dSYM
           make install DESTDIR=$DISTDIR
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: artifacts-mac
           path: |
