@@ -7,16 +7,8 @@ architectures:
 - "amd64"
 packages:
 - "curl"
-- "g++-aarch64-linux-gnu"
-- "g++-8-aarch64-linux-gnu"
-- "gcc-8-aarch64-linux-gnu"
 - "binutils-aarch64-linux-gnu"
-- "g++-riscv64-linux-gnu"
-- "g++-8-riscv64-linux-gnu"
-- "gcc-8-riscv64-linux-gnu"
 - "binutils-riscv64-linux-gnu"
-- "g++-8-multilib"
-- "gcc-8-multilib"
 - "binutils-gold"
 - "git"
 - "pkg-config"
@@ -26,13 +18,26 @@ packages:
 - "faketime"
 - "bsdmainutils"
 - "ca-certificates"
-- "python"
+- "python3"
 remotes:
 - "url": "https://github.com/blocknetdx/blocknet.git"
   "dir": "blocknet"
 files: []
 script: |
   set -e -o pipefail
+
+  # Add Ubuntu 20.04 repository which has GCC-8 packages
+  echo "deb http://archive.ubuntu.com/ubuntu/ focal main universe" | sudo tee /etc/apt/sources.list.d/focal.list
+  sudo apt-get update
+          
+  # Pin the focal repository to a lower priority
+  echo "Package: *" | sudo tee /etc/apt/preferences.d/focal-pin
+  echo "Pin: release n=focal" | sudo tee -a /etc/apt/preferences.d/focal-pin
+  echo "Pin-Priority: 100" | sudo tee -a /etc/apt/preferences.d/focal-pin
+  sudo apt-get update
+          
+  # Install the required GCC-8 packages
+  sudo apt-get install -y gcc-8 g++-8 gcc-8-aarch64-linux-gnu g++-8-aarch64-linux-gnu gcc-8-riscv64-linux-gnu g++-8-riscv64-linux-gnu gcc-8-multilib g++-8-multilib
 
   WRAP_DIR=$HOME/wrapped
   HOSTS="x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu"
