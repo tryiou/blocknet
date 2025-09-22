@@ -26,11 +26,20 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
+          # Target specific files for bionic and focal
+          for FILE in gitian-builder/docker/base-bionic-amd64.Dockerfile gitian-builder/docker/base-focal-amd64.Dockerfile; do
+            if [ -f "$FILE" ]; then
+              echo "Before fix:"
+              cat "$FILE"
+              sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' "$FILE"
+              echo "After fix:"
+              cat "$FILE"
+            fi
+          done
+          # General fix for any other Dockerfiles
           find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
           # Verify the change
           grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
-          # Log the full content of the affected Dockerfile for debugging
-          cat gitian-builder/docker/base-bionic-amd64.Dockerfile || true
 
       - name: Checkout detached sigs
         uses: actions/checkout@v4
@@ -142,11 +151,20 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
+          # Target specific files for bionic and focal
+          for FILE in gitian-builder/docker/base-bionic-amd64.Dockerfile gitian-builder/docker/base-focal-amd64.Dockerfile; do
+            if [ -f "$FILE" ]; then
+              echo "Before fix:"
+              cat "$FILE"
+              sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' "$FILE"
+              echo "After fix:"
+              cat "$FILE"
+            fi
+          done
+          # General fix for any other Dockerfiles
           find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
           # Verify the change
           grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
-          # Log the full content of the affected Dockerfile for debugging
-          cat gitian-builder/docker/base-bionic-amd64.Dockerfile || true
 
       - name: Checkout detached sigs
         uses: actions/checkout@v4
@@ -219,11 +237,20 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
+          # Target specific files for bionic and focal
+          for FILE in gitian-builder/docker/base-bionic-amd64.Dockerfile gitian-builder/docker/base-focal-amd64.Dockerfile; do
+            if [ -f "$FILE" ]; then
+              echo "Before fix:"
+              cat "$FILE"
+              sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' "$FILE"
+              echo "After fix:"
+              cat "$FILE"
+            fi
+          done
+          # General fix for any other Dockerfiles
           find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
           # Verify the change
           grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
-          # Log the full content of the affected Dockerfile for debugging
-          cat gitian-builder/docker/base-bionic-amd64.Dockerfile || true
 
       - name: Checkout detached sigs
         uses: actions/checkout@v4
