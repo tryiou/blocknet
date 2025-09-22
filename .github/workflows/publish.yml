@@ -31,13 +31,13 @@ jobs:
             if [ -f "$FILE" ]; then
               echo "Before fix:"
               cat "$FILE"
-              sed -i "s|RUN echo 'Acquire::http { Proxy \"http://http://archive.ubuntu.com/ubuntu:3142\"; };' > /etc/apt/apt.conf.d/50cacher|RUN echo 'Acquire::http { Proxy \"http://host.docker.internal:3142\"; };' > /etc/apt/apt.conf.d/50cacher|g" "$FILE"
+              sed -i 's|"http://http://archive.ubuntu.com/ubuntu:3142"|"http://host.docker.internal:3142"|g' "$FILE"
               echo "After fix:"
               cat "$FILE"
             fi
           done
           # General fix for any other Dockerfiles - replace the malformed proxy substring
-          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
+          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|"http://http://archive.ubuntu.com/ubuntu:3142"|"http://host.docker.internal:3142"|g' {} \; || true
           # Verify the change
           grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
 
@@ -156,13 +156,13 @@ jobs:
             if [ -f "$FILE" ]; then
               echo "Before fix:"
               cat "$FILE"
-              sed -i "s|RUN echo 'Acquire::http { Proxy \"http://http://archive.ubuntu.com/ubuntu:3142\"; };' > /etc/apt/apt.conf.d/50cacher|RUN echo 'Acquire::http { Proxy \"http://host.docker.internal:3142\"; };' > /etc/apt/apt.conf.d/50cacher|g" "$FILE"
+              sed -i 's|"http://http://archive.ubuntu.com/ubuntu:3142"|"http://host.docker.internal:3142"|g' "$FILE"
               echo "After fix:"
               cat "$FILE"
             fi
           done
           # General fix for any other Dockerfiles - replace the malformed proxy substring
-          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
+          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|"http://http://archive.ubuntu.com/ubuntu:3142"|"http://host.docker.internal:3142"|g' {} \; || true
           # Verify the change
           grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
 
@@ -242,13 +242,13 @@ jobs:
             if [ -f "$FILE" ]; then
               echo "Before fix:"
               cat "$FILE"
-              sed -i "s|RUN echo 'Acquire::http { Proxy \"http://http://archive.ubuntu.com/ubuntu:3142\"; };' > /etc/apt/apt.conf.d/50cacher|RUN echo 'Acquire::http { Proxy \"http://host.docker.internal:3142\"; };' > /etc/apt/apt.conf.d/50cacher|g" "$FILE"
+              sed -i 's|"http://http://archive.ubuntu.com/ubuntu:3142"|"http://host.docker.internal:3142"|g' "$FILE"
               echo "After fix:"
               cat "$FILE"
             fi
           done
           # General fix for any other Dockerfiles - replace the malformed proxy substring
-          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
+          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|"http://http://archive.ubuntu.com/ubuntu:3142"|"http://host.docker.internal:3142"|g' {} \; || true
           # Verify the change
           grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
 
