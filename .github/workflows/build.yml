@@ -24,7 +24,7 @@ jobs:
     env:
       HOST: x86_64-pc-linux-gnu
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         if: github.event.pull_request.draft == false
 
       - name: Setup depends
@@ -64,7 +64,7 @@ jobs:
     env:
       HOST: x86_64-w64-mingw32
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         if: github.event.pull_request.draft == false
 
       - name: Setup depends
@@ -106,7 +106,7 @@ jobs:
     env:
       HOST: x86_64-apple-darwin14
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         if: github.event.pull_request.draft == false
 
       - name: Setup depends
