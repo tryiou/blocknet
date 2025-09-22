@@ -26,6 +26,8 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
+          echo "=== DEBUG: PRINTING ORIGINAL UNMODIFIED CONTENTS OF ALL DOCKERFILES ==="
+          find gitian-builder/docker -name "*.Dockerfile" -type f -exec sh -c 'echo "--- ORIGINAL FILE: {} ---"; cat "{}"; echo "--- END OF ORIGINAL FILE ---"; echo ""' \;
           # Target specific files for bionic and focal
           for FILE in gitian-builder/docker/base-bionic-amd64.Dockerfile gitian-builder/docker/base-focal-amd64.Dockerfile; do
             if [ -f "$FILE" ]; then
@@ -151,6 +153,8 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
+          echo "=== DEBUG: PRINTING ORIGINAL UNMODIFIED CONTENTS OF ALL DOCKERFILES ==="
+          find gitian-builder/docker -name "*.Dockerfile" -type f -exec sh -c 'echo "--- ORIGINAL FILE: {} ---"; cat "{}"; echo "--- END OF ORIGINAL FILE ---"; echo ""' \;
           # Target specific files for bionic and focal
           for FILE in gitian-builder/docker/base-bionic-amd64.Dockerfile gitian-builder/docker/base-focal-amd64.Dockerfile; do
             if [ -f "$FILE" ]; then
@@ -237,6 +241,8 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
+          echo "=== DEBUG: PRINTING ORIGINAL UNMODIFIED CONTENTS OF ALL DOCKERFILES ==="
+          find gitian-builder/docker -name "*.Dockerfile" -type f -exec sh -c 'echo "--- ORIGINAL FILE: {} ---"; cat "{}"; echo "--- END OF ORIGINAL FILE ---"; echo ""' \;
           # Target specific files for bionic and focal
           for FILE in gitian-builder/docker/base-bionic-amd64.Dockerfile gitian-builder/docker/base-focal-amd64.Dockerfile; do
             if [ -f "$FILE" ]; then
