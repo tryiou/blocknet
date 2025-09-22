@@ -26,10 +26,11 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
-          sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' gitian-builder/docker/base-bionic-amd64.Dockerfile || true
-          sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' gitian-builder/docker/base-focal-amd64.Dockerfile || true
+          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
           # Verify the change
-          grep -n "Proxy" gitian-builder/docker/base-*.Dockerfile || true
+          grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
+          # Log the full content of the affected Dockerfile for debugging
+          cat gitian-builder/docker/base-bionic-amd64.Dockerfile || true
 
       - name: Checkout detached sigs
         uses: actions/checkout@v4
@@ -141,10 +142,11 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
-          sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' gitian-builder/docker/base-bionic-amd64.Dockerfile || true
-          sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' gitian-builder/docker/base-focal-amd64.Dockerfile || true
+          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
           # Verify the change
-          grep -n "Proxy" gitian-builder/docker/base-*.Dockerfile || true
+          grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
+          # Log the full content of the affected Dockerfile for debugging
+          cat gitian-builder/docker/base-bionic-amd64.Dockerfile || true
 
       - name: Checkout detached sigs
         uses: actions/checkout@v4
@@ -217,10 +219,11 @@ jobs:
 
       - name: Fix Gitian proxy configuration
         run: |
-          sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' gitian-builder/docker/base-bionic-amd64.Dockerfile || true
-          sed -i 's|Proxy "http://http://archive.ubuntu.com/ubuntu:3142"|Proxy "http://host.docker.internal:3142"|' gitian-builder/docker/base-focal-amd64.Dockerfile || true
+          find gitian-builder/docker -name "*.Dockerfile" -exec sed -i 's|http://http://archive.ubuntu.com/ubuntu:3142|http://host.docker.internal:3142|g' {} \; || true
           # Verify the change
-          grep -n "Proxy" gitian-builder/docker/base-*.Dockerfile || true
+          grep -n "Proxy\|http://.*:3142" gitian-builder/docker/*.Dockerfile || true
+          # Log the full content of the affected Dockerfile for debugging
+          cat gitian-builder/docker/base-bionic-amd64.Dockerfile || true
 
       - name: Checkout detached sigs
         uses: actions/checkout@v4
