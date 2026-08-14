@@ -6,6 +6,7 @@
 #define BITCOIN_UTIL_BIP32_H
 
 #include <attributes.h>
+#include <stdint.h>
 #include <string>
 #include <vector>
 
