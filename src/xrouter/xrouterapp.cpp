@@ -50,6 +50,12 @@ bool PushXRouterMessage(CNode *pnode, const T & message) {
     return true;
 }
 
+// Template is defined here rather than in a header; instantiate explicitly so
+// other translation units (xrouterserver.cpp) can link against it. Implicit
+// instantiation alone is not sufficient: with -O2, newer GCC (12+) emits only a
+// local IPA-SRA clone, causing undefined references at link time.
+template bool PushXRouterMessage(CNode *pnode, const std::vector<unsigned char> & message);
+
 /**
  * Return a copy of nodes, with incremented reference count.
  * @return
