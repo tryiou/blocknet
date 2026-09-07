@@ -10,7 +10,8 @@ define $(package)_set_vars
 endef
 
 define $(package)_preprocess_cmds
-  cp -f $(BASEDIR)/config.guess $(BASEDIR)/config.sub .
+  cp -f $(BASEDIR)/config.guess $(BASEDIR)/config.sub . && \
+  printf '#ifndef HAVE__XEATDATAWORDS\n#define _XEatDataWords(dpy,n) _XEatData((dpy), (unsigned long)4 * (n))\n#endif\n' > src/eat.h
 endef
 
 define $(package)_config_cmds

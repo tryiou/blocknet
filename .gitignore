@@ -74,6 +74,10 @@ src/qt/bitcoin-qt.includes
 *.o-*
 *.patch
 !contrib/guix/patches/*.patch
+!depends/patches/**/*.patch
+!depends/patches/qt/qt.pro
+!depends/patches/qt/qttools_src.pro
+!depends/patches/qt/mac-qmake.conf
 *.a
 *.pb.cc
 *.pb.h
@@ -140,3 +144,15 @@ db4/
 .idea/
 cmake-build-debug/
 CMakeLists.txt
+
+# Guix deterministic build outputs (not to commit)
+guix-build-*/
+blocknet-binaries/
+distsrc-*/
+depends/built/
+depends/work/
+depends/sources/
+depends/download/
+SHA256SUMS
+SHA256SUMS.part
+*~

@@ -26,19 +26,24 @@ Before every major release:
 * Update [`src/chainparams.cpp`](/src/chainparams.cpp) m_assumed_blockchain_size and m_assumed_chain_state_size with the current size plus some overhead.
 * Update `src/chainparams.cpp` chainTxData with statistics about the transaction count and rate. Use the output of the RPC `getchaintxstats`, see
   [this pull request](https://github.com/bitcoin/bitcoin/pull/12270) for an example. Reviewers can verify the results by running `getchaintxstats <window_block_count> <window_last_block_hash>` with the `window_block_count` and `window_last_block_hash` from your output.
-* Update version of `contrib/gitian-descriptors/*.yml`: usually one'd want to do this on master after branching off the release - but be sure to at least do it before a new major release
+* Update version of `contrib/gitian-descriptors/*.yml` (legacy, now `contrib/gitian-descriptors.legacy/`) or `contrib/guix` manifests: usually one'd want to do this on master after branching off the release - but be sure to at least do it before a new major release
 
-### First time / New builders
+### First time / New builders (Guix — successor to Gitian)
 
-If you're using the automated script (found in [contrib/gitian-build.py](/contrib/gitian-build.py)), then at this point you should run it with the "--setup" command. Otherwise ignore this.
+> **Gitian is deprecated** (bionic, python2, LXC — archived in `contrib/gitian-descriptors.legacy/` + `contrib/gitian-build.py.legacy`).
+> New deterministic builds use **Guix** on `ubuntu-22.04` (CI; local may be `24.04`) (see `.github/workflows/release.yml` + `contrib/guix/`).
+> `glibc` floor is `2.27` via Guix `glibc@2.27` (compatible with `18.04`+; runtime `FROM ubuntu:22.04` / `2.35`) / `--enable-glibc-back-compat`.
+> For old tag reproducibility, see legacy descriptors.
+
+If you're using the automated script (found in [contrib/guix/guix-build](/contrib/guix/guix-build)), then at this point you should run it with the setup step (Guix install via time-machine). Otherwise ignore this.
 
 Check out the source code in the following directory hierarchy.
 
     cd /path/to/your/toplevel/build
-    git clone https://github.com/bitcoin-core/gitian.sigs.git
-    git clone https://github.com/bitcoin-core/bitcoin-detached-sigs.git
-    git clone https://github.com/devrandom/gitian-builder.git
-    git clone https://github.com/bitcoin/bitcoin.git
+    git clone https://github.com/blocknetdx/gitian.sigs.git guix.sigs   # or gitian.sigs for legacy
+    git clone https://github.com/blocknetdx/blocknet-detached-sigs.git
+    git clone https://github.com/blocknetdx/blocknet.git blocknet
+     # Guix is installed on ubuntu-22.04 runner (see release.yml); locally: apt install guix (22.04 or 24.04)
 
 ### Bitcoin maintainers/release engineers, suggestion for writing release notes
 
@@ -57,14 +62,14 @@ Tag version (or release candidate) in git
 
     git tag -s v(new version, e.g. 0.8.0)
 
-### Setup and perform Gitian builds
+### Setup and perform Guix builds (successor to Gitian)
 
-If you're using the automated script (found in [contrib/gitian-build.py](/contrib/gitian-build.py)), then at this point you should run it with the "--build" command. Otherwise ignore this.
+If you're using the automated script (found in [contrib/guix/guix-build](/contrib/guix/guix-build) — legacy was `contrib/gitian-build.py`), then at this point you should run it with the build command. Otherwise ignore this.
 
-Setup Gitian descriptors:
+Setup Guix descriptors (was `contrib/gitian-descriptors/` → now `contrib/guix/` + `contrib/gitian-descriptors.legacy/` for old tags):
 
-    pushd ./bitcoin
-    export SIGNER="(your Gitian key, ie bluematt, sipa, etc)"
+    pushd ./blocknet
+    export SIGNER="(your Guix/Gitian key, ie bluematt, sipa, etc)"
     export VERSION=(new version, e.g. 0.8.0)
     git fetch
     git checkout v${VERSION}

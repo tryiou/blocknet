@@ -64,13 +64,19 @@ tuned to conserve memory with additional CXXFLAGS:
 
 ## Linux Distribution Specific Instructions
 
-### Ubuntu & Debian
+### Ubuntu & Debian (22.04 jammy / 24.04 noble — glibc 2.27 / 2.39)
+
+> Release binaries are built with `depends` + `--enable-glibc-back-compat` and
+> Docker `FROM ubuntu:22.04` (glibc 2.35 runtime, Guix glibc 2.27 floor). CI runs on `ubuntu-22.04` (x64)
+> and `ubuntu-24.04-arm` for aarch64. Old `gcc-8` / `bionic` images are
+> deprecated — see `.github/workflows/ci.yml` and `release.yml` (Guix successor
+> to Gitian).
 
 #### Dependency Build Instructions
 
-Build requirements:
+Build requirements (noble + jammy):
 
-    sudo apt-get install build-essential libtool autotools-dev automake pkg-config bsdmainutils python3
+    sudo apt-get install build-essential libtool autotools-dev automake pkg-config bsdmainutils python3 curl ca-certificates ccache git cmake
 
 Now, you can either build from self-compiled [depends](/depends/README.md) or install the required dependencies:
 
@@ -143,8 +149,8 @@ symbols, which reduces the executable size by about 90%.
 miniupnpc
 ---------
 
-[miniupnpc](http://miniupnp.free.fr/) may be used for UPnP port mapping.  It can be downloaded from [here](
-http://miniupnp.tuxfamily.org/files/).  UPnP support is compiled in and
+[miniupnpc](https://miniupnp.tuxfamily.org/files) may be used for UPnP port mapping.  It can be downloaded from [here](
+https://miniupnp.tuxfamily.org/files/).  UPnP support is compiled in and
 turned off by default.  See the configure options for upnp behavior desired:
 
 	--without-miniupnpc      No UPnP support miniupnp not required
@@ -258,7 +264,7 @@ As mentioned above, when maintaining portability of the wallet between the stand
 node software is desired, Berkeley DB 4.8 must be used.
 
 
-ARM Cross-compilation
+ARM Cross-compilation (aarch64 — native on ubuntu-24.04-arm)
 -------------------
 These steps can be performed on, for example, an Ubuntu VM. The depends system
 will also work on other Linux distributions, however the commands for
@@ -267,9 +273,20 @@ installing the toolchain will be different.
 Make sure you install the build requirements mentioned above.
 Then, install the toolchain and curl:
 
-    sudo apt-get install g++-arm-linux-gnueabihf curl
+    sudo apt-get install g++-aarch64-linux-gnu binutils-aarch64-linux-gnu curl
+    # Legacy 32-bit ARM (kept for reference):
+    # sudo apt-get install g++-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
 
-To build executables for ARM:
+To build executables for ARM64 (native on ubuntu-24.04-arm runner):
+
+    cd depends
+    make HOST=aarch64-linux-gnu NO_QT=1 -j$(nproc)
+    cd ..
+    ./autogen.sh
+    CONFIG_SITE=$PWD/depends/aarch64-linux-gnu/share/config.site ./configure --prefix=/ --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
+    make -j$(nproc)
+
+Legacy 32-bit:
 
     cd depends
     make HOST=arm-linux-gnueabihf NO_QT=1
@@ -278,5 +295,6 @@ To build executables for ARM:
     ./configure --prefix=$PWD/depends/arm-linux-gnueabihf --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
     make
 
-
+For CI matrix see `.github/workflows/ci.yml` (linux x64 on ubuntu-22.04, linux arm64 on ubuntu-24.04-arm).
+For deterministic releases see `.github/workflows/release.yml` + `contrib/guix/` (Guix, successor to Gitian).
 For further documentation on the depends system see [README.md](../depends/README.md) in the depends directory.

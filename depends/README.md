@@ -18,27 +18,32 @@ created. To use it for Bitcoin:
 
     ./configure --prefix=`pwd`/depends/x86_64-w64-mingw32
 
-Common `host-platform-triplets` for cross compilation are:
+Common `host-platform-triplets` for cross compilation are (CI pins in `.github/workflows/ci.yml`):
 
-- `i686-w64-mingw32` for Win32
-- `x86_64-w64-mingw32` for Win64
-- `x86_64-apple-darwin14` for macOS
-- `arm-linux-gnueabihf` for Linux ARM 32 bit
-- `aarch64-linux-gnu` for Linux ARM 64 bit
-- `riscv32-linux-gnu` for Linux RISC-V 32 bit
-- `riscv64-linux-gnu` for Linux RISC-V 64 bit
+- `i686-w64-mingw32` for Win32 (legacy)
+- `x86_64-w64-mingw32` for Win64 — CI `windows-2022`
+- `aarch64-w64-mingw32` for Win ARM64 — CI `windows-11-arm` (experimental, needs `qt` arm64 patch)
+- `x86_64-apple-darwin` / `arm64-apple-darwin` for macOS — CI `macos-15-intel` / `macos-15` (SDK 14.5/15.2, not 10.11)
+- `arm-linux-gnueabihf` for Linux ARM 32 bit (legacy)
+- `aarch64-linux-gnu` for Linux ARM 64 bit — CI `ubuntu-24.04-arm`
+- `x86_64-linux-gnu` / `x86_64-pc-linux-gnu` for Linux x64 — CI `ubuntu-22.04`
+- `riscv32-linux-gnu` / `riscv64-linux-gnu` for RISC-V (kept, not in CI matrix)
 
 No other options are needed, the paths are automatically configured.
 
-### Install the required dependencies: Ubuntu & Debian
+### Install the required dependencies: Ubuntu & Debian (22.04 jammy / 24.04 noble)
 
-#### For macOS cross compilation
+> CI: `ubuntu-22.04` (x64) + `ubuntu-24.04-arm` (aarch64) (see `ci.yml`). Releases via Guix on `ubuntu-22.04` with glibc 2.27 floor (`--enable-glibc-back-compat`, Docker `FROM ubuntu:22.04`).
 
-    sudo apt-get install curl librsvg2-bin libtiff-tools bsdmainutils cmake imagemagick libcap-dev libz-dev libbz2-dev python-setuptools
+#### For macOS cross compilation (SDK 14.5/15.2 — old 10.11 deprecated)
 
-#### For Win32/Win64 cross compilation
+    sudo apt-get install curl librsvg2-bin libtiff-tools bsdmainutils cmake imagemagick libcap-dev libz-dev libbz2-dev python3-setuptools
+    # plus: automake libtool pkg-config; SDK in depends/SDKs/ (see release.yml / contrib/guix)
+
+#### For Win32/Win64/WinARM64 cross compilation
 
 - see [build-windows.md](../doc/build-windows.md#cross-compilation-for-ubuntu-and-windows-subsystem-for-linux)
+- CI: `windows-2022` (x64) + `windows-11-arm` (arm64 via `aarch64-w64-mingw32`, experimental)
 
 #### For linux (including i386, ARM) cross compilation
 

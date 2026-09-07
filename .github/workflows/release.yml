@@ -1,0 +1,276 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. v4.4.1 or commit SHA). Leave empty for tag."
+        required: false
+        default: ""
+      os_filter:
+        description: "OS filter for Guix (l,w,m or lwm)"
+        required: false
+        default: "lwm"
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  VERSION: ${{ github.ref_name }}
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Deterministic Guix builds — single ubuntu-22.04 host cross-compiles all 6
+  # targets (local dev may be 24.04). This is the canonical release path (replaces Gitian bionic).
+  # Clean Guix-only — no depends fallback. CI workflow (.github/workflows/ci.yml)
+  # is the per-OS depends sanity path. Release determinism comes solely from Guix.
+  # glibc floor = 2.27 via Guix glibc@2.27 (compatible with 18.04+; runtime FROM ubuntu:22.04 / 2.35)
+  # ──────────────────────────────────────────────────────────────
+  guix-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: blocknet
+          fetch-depth: 0
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+          echo "Ref: ${{ github.ref_name }} / ${{ inputs.version }}"
+          cat blocknet/configure.ac | grep CLIENT_VERSION -m1 || true
+
+      - name: Checkout guix.sigs / detached-sigs (optional, for verification)
+        run: |
+          git clone --depth 1 https://github.com/blocknetdx/gitian.sigs.git guix.sigs || true
+          git clone --depth 1 https://github.com/blocknetdx/blocknet-detached-sigs.git detached-sigs || true
+        continue-on-error: true
+
+      - name: Install Guix (deterministic, noble)
+        run: |
+          set -e
+          if command -v guix >/dev/null 2>&1; then
+            guix --version
+            exit 0
+          fi
+          echo "Installing Guix on ubuntu-24.04 (for deterministic release)..."
+          # Guix is in universe on noble; use apt if available, otherwise official script
+          sudo apt-get update -qq
+          if apt-cache show guix >/dev/null 2>&1; then
+            echo "Installing via apt (guix from noble universe)..."
+            sudo apt-get install -y --no-install-recommends guix netbase
+          else
+            echo "apt guix not found — using official install.sh"
+            wget -q https://git.savannah.gnu.org/cgit/guix.git/plain/etc/guix-install.sh -O /tmp/guix-install.sh || \
+              curl -fsSL https://guix.gnu.org/install.sh -o /tmp/guix-install.sh
+            chmod +x /tmp/guix-install.sh
+            sudo /tmp/guix-install.sh --yes || sudo bash /tmp/guix-install.sh
+          fi
+          # Ensure guix is on PATH (apt installs to /usr/bin, script to /gnu)
+          export PATH="/gnu/var/guix/profiles/per-user/root/current-guix/bin:$PATH"
+          export GUIX_PROFILE="/root/.guix-profile"
+          . "$GUIX_PROFILE/etc/profile" 2>/dev/null || true
+          # Start daemon if not running (apt guix uses _guixbuild group, not guixbuild)
+          if ! guix gc --list-failures >/dev/null 2>&1; then
+            echo "Starting guix-daemon..."
+            # Ensure correct group exists (apt creates _guixbuild)
+            if getent group _guixbuild >/dev/null 2>&1; then
+              BUILD_GROUP=_guixbuild
+            elif getent group guixbuild >/dev/null 2>&1; then
+              BUILD_GROUP=guixbuild
+            else
+              sudo groupadd -r guixbuild 2>/dev/null || true
+              for i in $(seq 0 9); do sudo useradd -r -g guixbuild -G guixbuild -d /var/empty -s /usr/sbin/nologin guixbuilder$i 2>/dev/null || true; done
+              BUILD_GROUP=guixbuild
+            fi
+            echo "Using build group: $BUILD_GROUP"
+            sudo mkdir -p /gnu/store /var/guix 2>/dev/null || true
+            # Kill any stale daemon
+            sudo pkill guix-daemon 2>/dev/null || true
+            sleep 1
+            sudo guix-daemon --build-users-group="$BUILD_GROUP" --disable-chroot --disable-deduplication 2>&1 | tee /tmp/guix-daemon.log &
+            sleep 5
+            # Wait for daemon to be responsive (up to 30s)
+            for i in $(seq 1 10); do
+              if guix gc --list-failures >/dev/null 2>&1; then
+                echo "guix-daemon ready"
+                break
+              fi
+              echo "Waiting for guix-daemon... $i"
+              sleep 3
+            done
+          fi
+          guix --version || (which guix; ls -R /gnu 2>&1 | head -n 30; cat /tmp/guix-daemon.log 2>&1 | head -n 30; exit 1)
+          guix gc --list-failures >/dev/null 2>&1 || (echo "guix daemon not running"; cat /tmp/guix-daemon.log 2>&1 | head -n 50; exit 1)
+          # Authorize substitutes (optional, speeds up) — try both apt and /gnu paths
+          if [ -f /usr/share/guix/ci.guix.gnu.org.pub ]; then
+            sudo guix archive --authorize < /usr/share/guix/ci.guix.gnu.org.pub 2>/dev/null || true
+          elif [ -f /gnu/var/guix/profiles/per-user/root/current-guix/share/guix/ci.guix.gnu.org.pub ]; then
+            sudo guix archive --authorize < /gnu/var/guix/profiles/per-user/root/current-guix/share/guix/ci.guix.gnu.org.pub 2>/dev/null || true
+          fi
+
+      - name: Guix time-machine build (all hosts)
+        working-directory: blocknet
+        run: |
+          set -e
+          export GUIX_PROFILE="/root/.guix-profile"
+          . "$GUIX_PROFILE/etc/profile" 2>/dev/null || true
+          export PATH="/gnu/var/guix/profiles/per-user/root/current-guix/bin:$PATH"
+          if [ ! -f contrib/guix/manifest.scm ]; then
+            echo "::error::contrib/guix/manifest.scm missing"
+            exit 1
+          fi
+          # Default HOSTS is 6-arch; allow os_filter override (l,w,m or lwm)
+          # Map os_filter to HOSTS if provided
+          if [ -n "${{ inputs.os_filter }}" ] && [ "${{ inputs.os_filter }}" != "lwm" ]; then
+            FILTER="${{ inputs.os_filter }}"
+            HOSTS=""
+            case "$FILTER" in *l*) HOSTS="$HOSTS x86_64-linux-gnu aarch64-linux-gnu" ;; esac
+            case "$FILTER" in *w*) HOSTS="$HOSTS x86_64-w64-mingw32 aarch64-w64-mingw32" ;; esac
+            case "$FILTER" in *m*) HOSTS="$HOSTS x86_64-apple-darwin arm64-apple-darwin" ;; esac
+            export HOSTS="$(echo $HOSTS | xargs)"
+          fi
+          echo "HOSTS=$HOSTS"
+          # Dirty worktree allowed in CI (release.yml runs on clean tag, but allow)
+          export FORCE_DIRTY_WORKTREE=1
+          export JOBS="$(nproc)"
+          # release.yml expects artifacts in blocknet-binaries at workspace root,
+          # while prelude.bash defaults to guix-build-*/output — override
+          export OUTDIR_BASE="$PWD/../blocknet-binaries"
+          mkdir -p "$OUTDIR_BASE"
+          echo "OUTDIR_BASE=$OUTDIR_BASE"
+          ./contrib/guix/guix-build
+
+      - name: SHA256SUMS
+        run: |
+          ls -R blocknet-binaries 2>&1 | head -n 100 || true
+          find blocknet-binaries -type f -exec sha256sum {} \; | tee SHA256SUMS || true
+          cat SHA256SUMS || true
+          mkdir -p blocknet-binaries/${{ steps.ver.outputs.version }} || true
+
+      - name: Upload Guix artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: blocknet-guix-${{ steps.ver.outputs.version }}
+          path: |
+            blocknet-binaries/**
+            SHA256SUMS
+            guix.sigs/**
+            gitian-builder/result/**
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────
+  # Docker multi-arch — FROM ubuntu:22.04 (glibc 2.35 floor), not bionic/24.04
+  # ──────────────────────────────────────────────────────────────
+  docker:
+    needs: guix-build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: blocknet
+
+      - name: Download Guix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: blocknet-guix-${{ needs.guix-build.outputs.version }}
+          path: blocknet-binaries
+        continue-on-error: true
+
+      - name: List binaries
+        run: ls -R blocknet-binaries 2>/dev/null || ls -R blocknet/blocknet-binaries 2>/dev/null || echo "no binaries yet — docker will use placeholder"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: blocknetdx/blocknet
+          tags: |
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          flavor: |
+            latest=auto
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_BLOCKNETDXIMG_USERNAME }}
+          password: ${{ secrets.ORG_BLOCKNETDXIMG_PASSWORD }}
+
+      - name: Login to GHCR (fallback)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: blocknet
+          file: ./blocknet/contrib/containers/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+  github-release:
+    needs: [guix-build, docker]
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 30
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: blocknet-guix-${{ needs.guix-build.outputs.version }}
+          path: artifacts
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Blocknet Core ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          generate_release_notes: true
+          files: |
+            artifacts/blocknet-binaries/**/blocknet-*.tar.gz
+            artifacts/blocknet-binaries/**/blocknet-*.zip
+            artifacts/blocknet-binaries/**/blocknet-*.exe
+            artifacts/blocknet-binaries/**/blocknet-*.dmg
+            artifacts/SHA256SUMS
+            artifacts/gitian-builder/result/**

@@ -17,7 +17,9 @@
 
 #include <QDateTime>
 #include <QDebug>
+#ifndef QT_NO_SSL
 #include <QSslCertificate>
+#endif
 
 class SSLVerifyError : public std::runtime_error
 {
@@ -89,6 +91,7 @@ bool PaymentRequestPlus::getMerchant(X509_STORE* certStore, QString& merchant) c
     }
 
     std::vector<X509*> certs;
+#ifndef QT_NO_SSL
     const QDateTime currentTime = QDateTime::currentDateTime();
     for (int i = 0; i < certChain.certificate_size(); i++) {
         QByteArray certData(certChain.certificate(i).data(), certChain.certificate(i).size());
@@ -106,6 +109,14 @@ bool PaymentRequestPlus::getMerchant(X509_STORE* certStore, QString& merchant) c
         if (cert)
             certs.push_back(cert);
     }
+#else
+    for (int i = 0; i < certChain.certificate_size(); i++) {
+        const unsigned char *data = (const unsigned char *)certChain.certificate(i).data();
+        X509 *cert = d2i_X509(nullptr, &data, certChain.certificate(i).size());
+        if (cert)
+            certs.push_back(cert);
+    }
+#endif
     if (certs.empty()) {
         qWarning() << "PaymentRequestPlus::getMerchant: Payment request: empty certificate chain";
         return false;
