@@ -6,6 +6,7 @@
 
 #if defined(HAVE_CONFIG_H)
 #include <config/bitcoin-config.h>
+#include <algorithm>
 #endif
 
 #include <init.h>

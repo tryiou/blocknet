@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <policy/fees.h>
+#include <algorithm>
 #include <policy/policy.h>
 
 #include <clientversion.h>

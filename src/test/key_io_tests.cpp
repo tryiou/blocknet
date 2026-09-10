@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <test/data/key_io_invalid.json.h>
+#include <algorithm>
 #include <test/data/key_io_valid.json.h>
 
 #include <key.h>

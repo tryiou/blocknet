@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/recentrequeststablemodel.h>
+#include <algorithm>
 
 #include <qt/bitcoinunits.h>
 #include <qt/guiutil.h>

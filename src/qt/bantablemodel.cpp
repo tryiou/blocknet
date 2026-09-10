@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/bantablemodel.h>
+#include <algorithm>
 
 #include <qt/clientmodel.h>
 #include <qt/guiconstants.h>

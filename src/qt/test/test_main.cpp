@@ -74,7 +74,9 @@ int main(int argc, char *argv[])
     BitcoinApplication app(*node);
     app.setApplicationName("Blocknet-test");
 
-    SSL_library_init();
+    // OpenSSL >= 1.1.0 auto-initializes; SSL_library_init() was removed
+    // and must not be called with OpenSSL 3.x.
+    OPENSSL_init_ssl(0, nullptr);
 
     AppTests app_tests(app);
     if (QTest::qExec(&app_tests) != 0) {

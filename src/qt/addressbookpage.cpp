@@ -54,6 +54,18 @@ protected:
 
         return true;
     }
+
+    // ICU-free string comparison: our depends Qt is built -no-icu, and the base
+    // QSortFilterProxyModel::lessThan() routes strings through QCollator, which
+    // spams "posix collation implementation" warnings on every comparison.
+    bool lessThan(const QModelIndex& left, const QModelIndex& right) const override
+    {
+        QVariant l = sourceModel()->data(left, sortRole());
+        QVariant r = sourceModel()->data(right, sortRole());
+        if (l.userType() == QMetaType::QString)
+            return l.toString().compare(r.toString(), sortCaseSensitivity()) < 0;
+        return QSortFilterProxyModel::lessThan(left, right);
+    }
 };
 
 AddressBookPage::AddressBookPage(const PlatformStyle *platformStyle, Mode _mode, Tabs _tab, QWidget *parent) :

@@ -6,6 +6,7 @@
 //*****************************************************************************
 
 #include <xbridge/xbridgesession.h>
+#include <algorithm>
 
 #include <xbridge/bitcoinrpcconnector.h>
 #include <xbridge/util/fastdelegate.h>

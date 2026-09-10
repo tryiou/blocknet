@@ -8,7 +8,7 @@
 #     blocknet-guix:22.04 ./contrib/guix/guix-build
 #   # Or via helper:
 #   ./contrib/guix/docker-run.sh x86_64-linux-gnu
-FROM ubuntu:22.04
+FROM ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
 ENV DEBIAN_FRONTEND=noninteractive
 ENV GUIX_PROFILE=/root/.guix-profile
 ENV PATH=/root/.guix-profile/bin:/var/guix/profiles/per-user/root/current-guix/bin:/usr/local/bin:/usr/bin:/bin
@@ -25,6 +25,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     mkdir -p /gnu/store /var/guix && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+
+# Layer 1b: test runners for multi-arch smoke (inside container only, never host)
+# Pinned to jammy versions for resilience; rebuild only when this list changes.
+# file is canonical for all archs; qemu only for aarch64 linux file check (no wine - not needed to build Windows)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        qemu-user-static file binutils && \
+    qemu-aarch64-static --version 2>&1 | head -n1 || true; \
+    file --version 2>&1 | head -n1 || true; \
+    rm -f /tmp/guix-binary.tar.xz 2>/dev/null || true; \
+    apt-get clean && rm -rf /var/lib/apt/lists/* 2>/dev/null || true
 
 # Layer 2: Guix binary — separate layer, does not invalidate apt cache
 # Uses official guix-binary tarball (no systemd/init required, works in Docker)

@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xrouter/xrouterclient.h>
+#include <algorithm>
 
 #include <chainparams.h>
 #include <compat/sanity.h>
@@ -19,7 +20,6 @@
 #include <sys/stat.h>
 
 #ifdef ENABLE_EVENTSSL
-#include <openssl/engine.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
@@ -223,9 +223,9 @@ bool XRouterClient::start(std::string & error) {
     started = true;
 
 #ifdef ENABLE_EVENTSSL
-    SSL_library_init();
-    OpenSSL_add_all_algorithms();
-    SSL_load_error_strings();
+    // OpenSSL >= 1.1.0 auto-initializes; explicit init calls were removed
+    // and must not be called with OpenSSL 3.x.
+    OPENSSL_init_ssl(0, nullptr);
 #endif // ENABLE_EVENTSSL
 
     // Start xrouter
@@ -934,9 +934,8 @@ XRouterClient::~XRouterClient() {
     smgr.reset();
     gArgs.ClearArgs();
 #ifdef ENABLE_EVENTSSL
-    ENGINE_cleanup();
-    ERR_free_strings();
-    EVP_cleanup();
+    // OpenSSL >= 1.1.0 auto-deinitializes; explicit cleanup calls were
+    // removed in 1.1.0 and must not be called with OpenSSL 3.x.
 #endif // ENABLE_EVENTSSL
 }
 

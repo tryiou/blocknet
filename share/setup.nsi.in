@@ -2,6 +2,9 @@ Name "@PACKAGE_NAME@ (@WINDOWS_BITS@-bit)"
 
 RequestExecutionLevel highest
 SetCompressor /SOLID lzma
+# Determinism: do not store packaged files' mtimes in the installer
+# (matches upstream; otherwise every build differs).
+SetDateSave off
 
 # General Symbol Definitions
 !define REGKEY "SOFTWARE\$(^Name)"

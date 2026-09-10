@@ -6,6 +6,7 @@
 #define BLOCKNET_SERVICENODE_SERVICENODEMGR_H
 
 #include <amount.h>
+#include <algorithm>
 #include <key_io.h>
 #include <net.h>
 #include <netmessagemaker.h>

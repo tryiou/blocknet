@@ -7,6 +7,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <algorithm>
 #include <atomic>
 
 #if defined(__x86_64__) || defined(__amd64__) || defined(__i386__)

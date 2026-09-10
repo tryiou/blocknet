@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xbridge/xbridgerpc.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xbridge/util/logger.h>
 #include <xbridge/util/xutil.h>

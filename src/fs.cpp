@@ -1,4 +1,5 @@
 #include <fs.h>
+#include <limits>
 
 #ifndef WIN32
 #include <fcntl.h>
@@ -206,7 +207,9 @@ void ofstream::close()
 }
 #else // __GLIBCXX__
 
-static_assert(sizeof(*fs::path().BOOST_FILESYSTEM_C_STR) == sizeof(wchar_t),
+// NOTE: BOOST_FILESYSTEM_C_STR was removed in Boost 1.81; path::c_str()
+// is the direct replacement (const value_type*).
+static_assert(sizeof(*fs::path().c_str()) == sizeof(wchar_t),
     "Warning: This build is using boost::filesystem ofstream and ifstream "
     "implementations which will fail to open paths containing multibyte "
     "characters. You should delete this static_assert to ignore this warning, "

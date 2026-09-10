@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/bitcoingui.h>
+#include <algorithm>
 
 #include <qt/bitcoinunits.h>
 #include <qt/clientmodel.h>

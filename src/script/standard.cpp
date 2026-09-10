@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <script/standard.h>
+#include <algorithm>
 
 #include <crypto/sha256.h>
 #include <pubkey.h>

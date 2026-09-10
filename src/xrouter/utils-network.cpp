@@ -312,11 +312,14 @@ XRouterReply CallXRouterUrlSSL(const std::string & host, const int & port, const
         if (req) evhttp_request_free(req);
     };
 
-    SSL_CTX *ssl_ctx = SSL_CTX_new(SSLv23_method());
+    // SSLv23_method() is a deprecated alias; TLS_client_method() is the
+    // OpenSSL 1.1.0+/3.x API. Require TLS >= 1.2 explicitly.
+    SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_client_method());
     if (ssl_ctx == nullptr) {
         cleanup(ssl_ctx);
         throw std::runtime_error("failed to open ssl connection (1)");
     }
+    SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_2_VERSION);
     // TODO Blocknet xrclient cert verification
 //    int c1 = SSL_CTX_set_default_verify_paths(ssl_ctx);
 //    int c2 = SSL_CTX_load_verify_locations(ssl_ctx, "/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/certs"); // debian

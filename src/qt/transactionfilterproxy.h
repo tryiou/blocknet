@@ -53,6 +53,10 @@ public:
 
 protected:
     bool filterAcceptsRow(int source_row, const QModelIndex & source_parent) const;
+    // ICU-free string comparison: our depends Qt is built -no-icu, and the base
+    // QSortFilterProxyModel::lessThan() routes strings through QCollator, which
+    // spams "posix collation implementation" warnings on every comparison.
+    bool lessThan(const QModelIndex &left, const QModelIndex &right) const override;
 
 private:
     QDateTime dateFrom;

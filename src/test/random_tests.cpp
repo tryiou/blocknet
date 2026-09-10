@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <random.h>
+#include <iterator>
 
 #include <test/test_bitcoin.h>
 

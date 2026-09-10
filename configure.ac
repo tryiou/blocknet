@@ -62,8 +62,8 @@ case $host in
      lt_cv_deplibs_check_method="pass_all"
   ;;
 esac
-dnl Require C++11 compiler (no GNU extensions)
-AX_CXX_COMPILE_STDCXX([11], [noext], [mandatory], [nodefault])
+dnl Require C++17 compiler (no GNU extensions)
+AX_CXX_COMPILE_STDCXX([17], [noext], [mandatory])
 dnl Check if -latomic is required for <std::atomic>
 CHECK_ATOMIC
 
@@ -491,6 +491,8 @@ case $host in
      AC_CHECK_LIB([shlwapi],      [main],, AC_MSG_ERROR(libshlwapi missing))
      AC_CHECK_LIB([iphlpapi],      [main],, AC_MSG_ERROR(libiphlpapi missing))
      AC_CHECK_LIB([crypt32],      [main],, AC_MSG_ERROR(libcrypt32 missing))
+     dnl bcrypt: Boost >= 1.73 unique_path() uses BCrypt* CNG APIs on Windows.
+     AC_CHECK_LIB([bcrypt],      [main],, AC_MSG_ERROR(libbcrypt missing))
 
      # -static is interpreted by libtool, where it has a different meaning.
      # In libtool-speak, it's -all-static.
@@ -511,11 +513,12 @@ case $host in
      if test "x$CXXFLAGS_overridden" = "xno"; then
        CXXFLAGS="$CXXFLAGS -w"
      fi
-     case $host in
-       i?86-*) WINDOWS_BITS=32 ;;
-       x86_64-*) WINDOWS_BITS=64 ;;
-       *) AC_MSG_ERROR("Could not determine win32/win64 for installer") ;;
-     esac
+      case $host in
+        i?86-*) WINDOWS_BITS=32 ;;
+        x86_64-*) WINDOWS_BITS=64 ;;
+        aarch64-*) WINDOWS_BITS=64 ;;
+        *) AC_MSG_ERROR("Could not determine win32/win64 for installer") ;;
+      esac
      AC_SUBST(WINDOWS_BITS)
 
      dnl libtool insists upon adding -nostdlib and a list of objects/libs to link against.
@@ -934,7 +937,7 @@ fi
 if test x$use_boost = xyes; then
 
 dnl Minimum required Boost version
-define(MINIMUM_REQUIRED_BOOST, 1.47.0)
+define(MINIMUM_REQUIRED_BOOST, 1.73.0)
 
 dnl Check for boost libs
 AX_BOOST_BASE([MINIMUM_REQUIRED_BOOST])
@@ -1167,6 +1170,18 @@ else
   fi
 
   if test "x$use_zmq" = "xyes"; then
+     dnl We always link libzmq statically; zmq.h marks its symbols
+     dnl __declspec(dllimport) unless ZMQ_STATIC is defined, which makes
+     dnl strict linkers (lld) reject the probe even though the static lib
+     dnl is fine (GNU ld tolerates it, which is why this only bites on
+     dnl llvm-mingw). Define it for the probes below (and keep it for the
+     dnl build further down).
+     zmq_save_CPPFLAGS="$CPPFLAGS"
+     case $host in
+       *mingw*)
+         CPPFLAGS="$CPPFLAGS -DZMQ_STATIC"
+       ;;
+     esac
      AC_CHECK_HEADER([zmq.h],
        [AC_DEFINE([ENABLE_ZMQ],[1],[Define to 1 to enable ZMQ functions])],
        [AC_MSG_WARN([zmq.h not found, disabling zmq support])
@@ -1176,6 +1191,7 @@ else
        [AC_MSG_WARN([libzmq >= 4.0 not found, disabling zmq support])
         use_zmq=no
         AC_DEFINE([ENABLE_ZMQ],[0],[Define to 1 to enable ZMQ functions])])
+     CPPFLAGS="$zmq_save_CPPFLAGS"
   else
     AC_DEFINE_UNQUOTED([ENABLE_ZMQ],[0],[Define to 1 to enable ZMQ functions])
   fi

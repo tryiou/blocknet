@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <boost/test/unit_test.hpp>
+#include <algorithm>
+#include <iterator>
 
 #define protected public // for overridding protected fields in CChainParams
 #include <chainparams.h>

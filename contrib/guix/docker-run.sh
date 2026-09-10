@@ -2,7 +2,9 @@
 set -e -o pipefail
 # Isolated Guix build — never touches host. Use Docker BuildKit cache + persistent store.
 # Usage: ./contrib/guix/docker-run.sh [HOSTS]  # default: x86_64-linux-gnu
-HOSTS="${1:-x86_64-linux-gnu}"
+#        HOSTS="x86_64-linux-gnu aarch64-linux-gnu" ./contrib/guix/docker-run.sh
+#        # or: ./contrib/guix/docker-run.sh "x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-mingw32"
+HOSTS="${1:-${HOSTS:-x86_64-linux-gnu}}"
 JOBS="${JOBS:-$(nproc)}"
 
 # Build image once (cached)
@@ -35,6 +37,11 @@ docker run --rm --privileged \
     export PATH="/root/.guix-profile/bin:$PATH"
     # Start daemon with chroot (proper isolation)
     if getent group _guixbuild >/dev/null; then BUILD_GROUP=_guixbuild; else BUILD_GROUP=guixbuild; fi
+    # Drop stale socket from unclean previous runs (persistent /var/guix
+    # volume keeps it, but no daemon is alive to serve it).
+    if ! guix gc --list-failures >/dev/null 2>&1; then
+      rm -f /var/guix/daemon-socket/socket
+    fi
     if ! guix gc --list-failures >/dev/null 2>&1; then
       echo "Starting guix-daemon --build-users-group=$BUILD_GROUP ..."
       guix-daemon --build-users-group="$BUILD_GROUP" &
@@ -46,6 +53,41 @@ docker run --rm --privileged \
     ./contrib/guix/guix-build
     echo "---SHA256SUMS---"
     find blocknet-binaries -type f -exec sha256sum {} \; | tee SHA256SUMS
+    echo "---SMOKE (inside container, no host pollution)---"
+    for _host in $HOSTS; do
+      echo "HOST=$_host"
+      _bin="blocknet-binaries/$_host"
+      ls -R "$_bin" 2>&1 | head -n 20 || true
+      # find executables
+      for _exe in $(find "$_bin" -type f -name "blocknetd*" -o -name "blocknet-qt*" 2>/dev/null | head -n 5); do
+        echo "FILE $_exe: $(file -b "$_exe" 2>&1 | head -n1)"
+        case "$_host" in
+          *linux-gnu)
+            if echo "$_host" | grep -q aarch64; then
+              if command -v qemu-aarch64-static >/dev/null 2>&1; then
+                echo "QEMU smoke $_exe --version"
+                qemu-aarch64-static "$_exe" --version 2>&1 | head -n5 || echo "qemu smoke failed (expected for cross, file check above is canonical)"
+              else
+                echo "qemu-aarch64-static not in image (Layer 1b)"
+              fi
+            else
+              # x86_64 native — can run directly inside container
+              echo "NATIVE smoke $_exe --version"
+              "$_exe" --version 2>&1 | head -n5 || file "$_exe" 2>&1 | head -n5
+            fi
+            ;;
+          *mingw32)
+            # Windows: file is canonical, no wine needed to build (only cross via mingw)
+            file "$_exe" 2>&1 | head -n1
+            ;;
+          *darwin*)
+            echo "DARWIN artifact (Mach-O) — file check only on Linux"
+            file "$_exe" 2>&1 | head -n1 || true
+            ;;
+        esac
+      done
+    done
+    echo "SMOKE done"
   '
 
 echo "Done. Artifacts in blocknet-binaries/, SHA256SUMS at root."

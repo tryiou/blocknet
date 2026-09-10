@@ -6,6 +6,8 @@
 #define BLOCKNET_GOVERNANCE_GOVERNANCE_H
 
 #include <amount.h>
+#include <algorithm>
+#include <iterator>
 #include <dbwrapper.h>
 #include <chain.h>
 #include <consensus/params.h>

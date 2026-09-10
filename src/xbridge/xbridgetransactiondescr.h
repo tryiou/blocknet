@@ -6,6 +6,7 @@
 #define BLOCKNET_XBRIDGE_XBRIDGETRANSACTIONDESCR_H
 
 #include <xbridge/xbridgedef.h>
+#include <algorithm>
 #include <xbridge/xbridgepacket.h>
 #include <xbridge/xbridgewalletconnector.h>
 

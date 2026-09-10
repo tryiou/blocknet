@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <key_io.h>
+#include <algorithm>
 #include <keystore.h>
 #include <policy/fees.h>
 #include <outputtype.h>

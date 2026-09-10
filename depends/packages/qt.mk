@@ -104,14 +104,12 @@ $(package)_config_opts += -no-feature-image_heuristic_mask
 $(package)_config_opts += -no-feature-keysequenceedit
 $(package)_config_opts += -no-feature-lcdnumber
 $(package)_config_opts += -no-feature-networkdiskcache
-$(package)_config_opts += -no-feature-networkproxy
 $(package)_config_opts += -no-feature-pdf
 $(package)_config_opts += -no-feature-printdialog
 $(package)_config_opts += -no-feature-printer
 $(package)_config_opts += -no-feature-printpreviewdialog
 $(package)_config_opts += -no-feature-printpreviewwidget
 $(package)_config_opts += -no-feature-sessionmanager
-$(package)_config_opts += -no-feature-socks5
 $(package)_config_opts += -no-feature-sql
 $(package)_config_opts += -no-feature-sqlmodel
 $(package)_config_opts += -no-feature-statemachine
@@ -172,10 +170,17 @@ else
   $(package)_config_opts_linux += -platform linux-g++ -xplatform bitcoin-linux-g++
 endif
 
+# Windows (all arches, llvm-mingw/Clang) uses win32-clang-g++ — same
+# mechanism MSYS2 uses for CLANG64/CLANGARM64 Qt 5.15. One block serves
+# both x86_64 and aarch64: QMAKE_* and CROSS_COMPILE resolve per-host at
+# staging time (only parse-time-ready refs like $(host) are used here).
+# NOTE: spelled out explicitly, not derived via $(subst): set_vars bodies
+# are expanded by $(call) BEFORE $(eval), so sibling-var references would
+# be empty at that point.
 $(package)_config_opts_mingw32 = -no-opengl
 $(package)_config_opts_mingw32 += -no-dbus
 $(package)_config_opts_mingw32 += -no-freetype
-$(package)_config_opts_mingw32 += -xplatform win32-g++
+$(package)_config_opts_mingw32 += -xplatform win32-clang-g++
 $(package)_config_opts_mingw32 += "QMAKE_CFLAGS = '$($(package)_cflags) $($(package)_cppflags)'"
 $(package)_config_opts_mingw32 += "QMAKE_CXX = '$($(package)_cxx)'"
 $(package)_config_opts_mingw32 += "QMAKE_CXXFLAGS = '$($(package)_cxxflags) $($(package)_cppflags)'"

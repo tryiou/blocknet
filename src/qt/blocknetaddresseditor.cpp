@@ -10,6 +10,7 @@
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTextDocumentFragment>
 #include <QTextFragment>
 #include <QXmlStreamReader>

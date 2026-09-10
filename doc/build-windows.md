@@ -1,6 +1,13 @@
 WINDOWS BUILD NOTES
 ====================
 
+> NOTE (Blocknet): release builds use Guix inside Docker for both
+> Windows arches (`x86_64-w64-mingw32`, `aarch64-w64-mingw32`) with a
+> single pinned llvm-mingw Clang toolchain (UCRT) — see
+> `depends/README.md` ("Windows" section) and
+> `contrib/guix/docker-run.sh`. The manual mingw-GCC notes below are
+> legacy Bitcoin-inherited text, kept for non-release tinkering only.
+
 Below are some notes on how to build Bitcoin Core for Windows.
 
 The options known to work for building Bitcoin Core on Windows are:

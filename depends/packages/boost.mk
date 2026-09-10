@@ -1,26 +1,29 @@
 package=boost
-$(package)_version=1_64_0
-$(package)_download_path=https://archives.boost.io/release/1.64.0/source
+$(package)_version=1_81_0
+$(package)_download_path=https://archives.boost.io/release/1.81.0/source
 $(package)_file_name=$(package)_$($(package)_version).tar.bz2
-$(package)_sha256_hash=7bcc5caace97baa948931d712ea5f37038dbb1c5d89b43ad4def4ed7cb683332
+$(package)_sha256_hash=71feeed900fbccca04a3b4f2f84a7c217186f28a940ed8b7ed4725986baf99fa
 
 define $(package)_set_vars
 $(package)_config_opts_release=variant=release
 $(package)_config_opts_debug=variant=debug
-$(package)_config_opts=--layout=tagged --build-type=complete --user-config=user-config.jam
+# NOTE: --layout=system (plain libboost_*.a names). --layout=tagged adds
+# -mt-x64 suffixes that our AX_BOOST_* macros do not search for.
+# (--build-type=complete is incompatible with --layout=system; single
+# variant is all we need.)
+$(package)_config_opts=--layout=system --user-config=user-config.jam
 $(package)_config_opts+=threading=multi link=static -sNO_BZIP2=1 -sNO_ZLIB=1
 $(package)_config_opts_linux=threadapi=pthread runtime-link=shared
 $(package)_config_opts_darwin=--toolset=darwin-4.2.1 runtime-link=shared
 $(package)_config_opts_mingw32=binary-format=pe target-os=windows threadapi=win32 runtime-link=static
 $(package)_config_opts_x86_64_mingw32=address-model=64
-$(package)_config_opts_i686_mingw32=address-model=32
-$(package)_config_opts_i686_linux=address-model=32 architecture=x86
+$(package)_config_opts_aarch64_mingw32=address-model=64
 $(package)_toolset_$(host_os)=gcc
 $(package)_archiver_$(host_os)=$($(package)_ar)
 $(package)_toolset_darwin=darwin
 $(package)_archiver_darwin=$($(package)_libtool)
 $(package)_config_libraries=chrono,filesystem,system,thread,test,date_time
-$(package)_cxxflags=-std=c++11 -fvisibility=hidden
+$(package)_cxxflags=-std=c++17 -fvisibility=hidden
 $(package)_cxxflags_linux=-fPIC
 endef
 

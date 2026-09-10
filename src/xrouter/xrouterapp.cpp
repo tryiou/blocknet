@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xrouter/xrouterapp.h>
+#include <algorithm>
 
 #include <xrouter/xroutererror.h>
 #include <xrouter/xrouterlogger.h>
@@ -29,7 +30,6 @@
 #ifdef ENABLE_EVENTSSL
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
-#include <openssl/engine.h>
 #endif // ENABLE_EVENTSSL
 
 extern void Misbehaving(NodeId nodeid, int howmuch, const std::string& message="") EXCLUSIVE_LOCKS_REQUIRED(cs_main); // declared in net_processing.cpp
@@ -148,9 +148,10 @@ bool App::start()
         return false;
 
 #ifdef ENABLE_EVENTSSL
-    SSL_library_init();
-    OpenSSL_add_all_algorithms();
-    SSL_load_error_strings();
+    // OpenSSL >= 1.1.0 auto-initializes; explicit init calls were removed.
+    // (SSL_library_init/OpenSSL_add_all_algorithms/SSL_load_error_strings
+    // are no-ops/deleted and must not be called with OpenSSL 3.x.)
+    OPENSSL_init_ssl(0, nullptr);
 #endif // ENABLE_EVENTSSL
 
     // Only start server mode if we're a servicenode
@@ -583,9 +584,8 @@ bool App::stop(const bool safeCleanup)
     stopped = true;
 
 #ifdef ENABLE_EVENTSSL
-    ENGINE_cleanup();
-    ERR_free_strings();
-    EVP_cleanup();
+    // OpenSSL >= 1.1.0 auto-deinitializes; explicit cleanup calls were
+    // removed in 1.1.0 and must not be called with OpenSSL 3.x.
 #endif // ENABLE_EVENTSSL
 
     if (safeCleanup)

@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/guiutil.h>
+#include <algorithm>
 
 #include <qt/bitcoinaddressvalidator.h>
 #include <qt/bitcoinunits.h>

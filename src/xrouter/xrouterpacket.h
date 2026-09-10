@@ -6,6 +6,8 @@
 #define BLOCKNET_XROUTER_XROUTERPACKET_H
 
 #include <xrouter/xrouterlogger.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xrouter/version.h>
 

@@ -6,6 +6,7 @@
 #define BITCOIN_BLOCKENCODINGS_H
 
 #include <primitives/block.h>
+#include <algorithm>
 
 #include <memory>
 

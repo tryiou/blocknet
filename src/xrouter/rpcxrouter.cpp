@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <rpc/server.h>
+#include <iterator>
 
 #include <xbridge/xbridgeapp.h>
 #include <xrouter/xrouterapp.h>

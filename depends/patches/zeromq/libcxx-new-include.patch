@@ -1,0 +1,12 @@
+--- a/src/polling_util.hpp	2021-01-03 22:46:01.000000000 +0100
++++ b/src/polling_util.hpp	2026-09-09 17:06:59.005072556 +0200
+@@ -30,6 +30,9 @@
+ #ifndef __ZMQ_SOCKET_POLLING_UTIL_HPP_INCLUDED__
+ #define __ZMQ_SOCKET_POLLING_UTIL_HPP_INCLUDED__
+ 
++// std::nothrow (used below) is declared in <new>. libstdc++ provides it
++// transitively via other headers, but libc++ (llvm-mingw) does not.
++#include <new>
+ #include <stdlib.h>
+ #include <vector>
+ 

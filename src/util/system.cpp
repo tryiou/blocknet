@@ -5,6 +5,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <util/system.h>
+#include <iterator>
 
 #include <chainparamsbase.h>
 #include <random.h>

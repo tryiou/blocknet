@@ -6,6 +6,7 @@
 //*****************************************************************************
 
 #include <xbridge/xbridgeapp.h>
+#include <iterator>
 
 #include <xbridge/util/logger.h>
 #include <xbridge/util/settings.h>
@@ -85,10 +86,9 @@ class App::Impl
 {
     friend class App;
 
-    enum
-    {
-        TIMER_INTERVAL = 15
-    };
+    // NOTE: typed constexpr (not unscoped enum) — Boost >= 1.70
+    // constrains posix_time::seconds() to integral types.
+    static constexpr long TIMER_INTERVAL = 15;
 
 protected:
     /**

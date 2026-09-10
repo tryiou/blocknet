@@ -50,18 +50,18 @@ BASEPREFIX="${PWD}/depends"
 # Given a package name and an output name, return the path of that output in our
 # current guix environment
 store_path() {
-    grep --extended-regexp "/[^-]{32}-${1}-[^-]+${2:+-${2}}" "${GUIX_ENVIRONMENT}/manifest" \
+    grep --extended-regexp "/[^-]{32}-${1}-[^-]+${2:+-${2}}" "${GUIX_ENVIRONMENT}/manifest" 2>/dev/null \
         | head --lines=1 \
         | sed --expression='s|\x29*$||' \
               --expression='s|^[[:space:]]*"||' \
-              --expression='s|"[[:space:]]*$||'
+              --expression='s|"[[:space:]]*$||' || true
 }
 
 
 # Set environment variables to point the NATIVE toolchain to the right
 # includes/libs
 NATIVE_GCC="$(store_path gcc-toolchain)"
-NATIVE_GCC_STATIC="$(store_path gcc-toolchain static)"
+NATIVE_GCC_STATIC="$(store_path gcc-toolchain static || true)"
 
 unset LIBRARY_PATH
 unset CPATH
@@ -70,7 +70,11 @@ unset CPLUS_INCLUDE_PATH
 unset OBJC_INCLUDE_PATH
 unset OBJCPLUS_INCLUDE_PATH
 
-export LIBRARY_PATH="${NATIVE_GCC}/lib:${NATIVE_GCC_STATIC}/lib"
+if [ -n "$NATIVE_GCC_STATIC" ] && [ -d "${NATIVE_GCC_STATIC}/lib" ]; then
+    export LIBRARY_PATH="${NATIVE_GCC}/lib:${NATIVE_GCC_STATIC}/lib"
+else
+    export LIBRARY_PATH="${NATIVE_GCC}/lib"
+fi
 export C_INCLUDE_PATH="${NATIVE_GCC}/include"
 export CPLUS_INCLUDE_PATH="${NATIVE_GCC}/include/c++:${NATIVE_GCC}/include"
 export OBJC_INCLUDE_PATH="${NATIVE_GCC}/include"
@@ -80,20 +84,34 @@ export OBJCPLUS_INCLUDE_PATH="${NATIVE_GCC}/include/c++:${NATIVE_GCC}/include"
 # includes/libs for $HOST
 case "$HOST" in
     *mingw*)
-        # Determine output paths to use in CROSS_* environment variables
-        CROSS_GLIBC="$(store_path "mingw-w64-x86_64-winpthreads")"
-        CROSS_GCC="$(store_path "gcc-cross-${HOST}")"
-        CROSS_GCC_LIB_STORE="$(store_path "gcc-cross-${HOST}" lib)"
-        CROSS_GCC_LIBS=( "${CROSS_GCC_LIB_STORE}/lib/gcc/${HOST}"/* ) # This expands to an array of directories...
-        CROSS_GCC_LIB="${CROSS_GCC_LIBS[0]}" # ...we just want the first one (there should only be one)
-
-        # The search path ordering is generally:
-        #    1. gcc-related search paths
-        #    2. libc-related search paths
-        #    2. kernel-header-related search paths (not applicable to mingw-w64 hosts)
-        export CROSS_C_INCLUDE_PATH="${CROSS_GCC_LIB}/include:${CROSS_GCC_LIB}/include-fixed:${CROSS_GLIBC}/include"
-        export CROSS_CPLUS_INCLUDE_PATH="${CROSS_GCC}/include/c++:${CROSS_GCC}/include/c++/${HOST}:${CROSS_GCC}/include/c++/backward:${CROSS_C_INCLUDE_PATH}"
-        export CROSS_LIBRARY_PATH="${CROSS_GCC_LIB_STORE}/lib:${CROSS_GCC_LIB}:${CROSS_GLIBC}/lib"
+        # Windows (all arches): single toolchain — pinned llvm-mingw
+        # (Clang/LLVM, UCRT) from the Guix manifest. The wrappers are
+        # self-contained (clang/lld/compiler-rt/libc++/headers+libs), so no
+        # CROSS_* search paths are needed (sanity check below skips empty).
+        LLVM_MINGW="$(store_path llvm-mingw-toolchain)"
+        export LLVM_MINGW
+        export PATH="${LLVM_MINGW}/bin:${PATH}"
+        # Clang searches CPLUS_INCLUDE_PATH/C_INCLUDE_PATH BEFORE its own
+        # libc++/resource headers, so the Guix native GCC headers would
+        # shadow the toolchain's (verified: <version> resolved to gcc-12's,
+        # then bits/c++config.h missing). But native tools (e.g. protobuf's
+        # CXX_FOR_BUILD probe) NEED those vars. Solution: shim the two
+        # compile drivers to scrub the vars, keeping the global env intact
+        # (the native wrapped gcc does not need them, but plain g++/gcc
+        # probes like protobuf's do).
+        LLVM_SHIMS="${BASEPREFIX}/llvm-shims/bin"
+        mkdir -p "${LLVM_SHIMS}"
+        for _tool in clang clang++; do
+            cat > "${LLVM_SHIMS}/${HOST}-${_tool}" <<'EOF'
+#!/bin/sh
+# Scrub Guix native include vars (see build.sh) then exec the real driver.
+unset CPLUS_INCLUDE_PATH C_INCLUDE_PATH
+exec "${LLVM_MINGW}/bin/__HOST__-__TOOL__" "$@"
+EOF
+            sed -i "s/__HOST__/${HOST}/; s/__TOOL__/${_tool}/" "${LLVM_SHIMS}/${HOST}-${_tool}"
+            chmod +x "${LLVM_SHIMS}/${HOST}-${_tool}"
+        done
+        export PATH="${LLVM_SHIMS}:${PATH}"
         ;;
     *darwin*)
         # The CROSS toolchain for darwin uses the SDK and ignores environment variables.
@@ -185,8 +203,23 @@ esac
 
 # Ensure perl is available (debug, can be removed)
 # which perl 2>&1 | head; ls -ld "$(command -v perl)" 2>&1 | head
+# Windows (all arches) uses llvm-mingw Clang wrappers instead of a GCC
+# cross (hebasto's recipe: CC=<host>-clang CXX=<host>-clang++). The
+# ?=-defaults in depends/hosts/default.mk yield to these command-line
+# overrides. host_arch is x86_64/aarch64, so this expands to
+# x86_64_mingw32_*/aarch64_mingw32_* overrides.
+DEPENDS_HOST_TOOLS=""
+case "$HOST" in
+    *mingw*)
+        _arch="${HOST%%-*}"
+        DEPENDS_HOST_TOOLS="${_arch}_mingw32_CC=${HOST}-clang ${_arch}_mingw32_CXX=${HOST}-clang++ ${_arch}_mingw32_AR=${HOST}-ar ${_arch}_mingw32_RANLIB=${HOST}-ranlib ${_arch}_mingw32_STRIP=${HOST}-strip ${_arch}_mingw32_NM=${HOST}-nm"
+        ;;
+esac
+
 # Build the depends tree, overriding variables that assume multilib gcc
+# shellcheck disable=SC2086
 make -C depends --jobs="$JOBS" HOST="$HOST" \
+                                   ${DEPENDS_HOST_TOOLS} \
                                    ${V:+V=1} \
                                    ${SOURCES_PATH+SOURCES_PATH="$SOURCES_PATH"} \
                                    ${BASE_CACHE+BASE_CACHE="$BASE_CACHE"} \
@@ -210,7 +243,24 @@ GIT_ARCHIVE="${DIST_ARCHIVE_BASE}/${DISTNAME}.tar.gz"
 if [ ! -e "$GIT_ARCHIVE" ]; then
     mkdir -p "$(dirname "$GIT_ARCHIVE")"
     git config --global --add safe.directory /blocknet 2>/dev/null || true
-    git archive --prefix="${DISTNAME}/" --output="$GIT_ARCHIVE" HEAD
+    if [ -n "$FORCE_DIRTY_WORKTREE" ]; then
+        # Include dirty worktree (uncommitted fixes) for local testing without commit
+        # Use git to list tracked + dirty files, then tar deterministically
+        git config --global --add safe.directory /blocknet 2>/dev/null || true
+        # Create list of files to archive: tracked files + untracked patches
+        git ls-files -z > /tmp/git-ls-files.z 2>/dev/null || true
+        # Add untracked patch files (e.g., new libevent patch)
+        find depends/patches -type f -print0 2>/dev/null | cat - /tmp/git-ls-files.z > /tmp/all-files.z 2>/dev/null || cp /tmp/git-ls-files.z /tmp/all-files.z
+        tar --null --files-from=/tmp/all-files.z --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH}" --sort=name \
+            --transform="s,^,${DISTNAME}/," -czf "$GIT_ARCHIVE" 2>/dev/null || \
+        tar --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH}" --sort=name \
+            --transform="s,^\./,${DISTNAME}/," --exclude=".git" --exclude="./guix-build-*" \
+            --exclude="./blocknet-binaries" --exclude="./depends/work" --exclude="./depends/built" \
+            --exclude="./depends/llvm-shims" \
+            -czf "$GIT_ARCHIVE" .
+    else
+        git archive --prefix="${DISTNAME}/" --output="$GIT_ARCHIVE" HEAD
+    fi
 fi
 
 mkdir -p "$OUTDIR"
@@ -220,7 +270,9 @@ mkdir -p "$OUTDIR"
 ###########################
 
 # CONFIGFLAGS
-CONFIGFLAGS="--enable-reduce-exports --disable-bench --disable-gui-tests --disable-fuzz-binary"
+# NOTE: --with-gui=qt5 is mandatory (FULL GUI builds). Missing Qt must
+# hard-fail at configure time instead of silently shipping daemon-only.
+CONFIGFLAGS="--enable-reduce-exports --disable-bench --disable-gui-tests --disable-fuzz-binary --with-gui=qt5"
 
 # CFLAGS
 HOST_CFLAGS="-O2 -g"
@@ -282,9 +334,32 @@ mkdir -p "$DISTSRC"
     mkdir -p "$OUTDIR"
 
     # Make the os-specific installers
+    # FULL GUI policy: missing blocknet-qt(.exe) is a hard error, never a
+    # silent daemon-only artifact.
     case "$HOST" in
         *mingw*)
-            make deploy ${V:+V=1} BITCOIN_WIN_INSTALLER="${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+            if [ -f src/qt/blocknet-qt.exe ] || [ -f src/qt/bitcoin-qt.exe ] || [ -f src/qt/qt/blocknet-qt.exe ]; then
+                make deploy ${V:+V=1} BITCOIN_WIN_INSTALLER="${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+                # NOTE: setup.nsi's OutFile is baked at configure time
+                # (@abs_top_srcdir@/...-win-setup.exe), so makensis writes next
+                # to the source tree, NOT to BITCOIN_WIN_INSTALLER (the Makefile
+                # only echoes that name). Relocate to the canonical unsigned name.
+                for _nsi_out in ./*-win64-setup.exe; do
+                    if [ -f "$_nsi_out" ]; then
+                        mv -f "$_nsi_out" "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+                    fi
+                done
+                unset _nsi_out
+            else
+                echo "ERROR: blocknet-qt.exe not built (Qt GUI required, see --with-gui=qt5)" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            if [ ! -f src/qt/blocknet-qt ] && [ ! -f src/qt/bitcoin-qt ]; then
+                echo "ERROR: blocknet-qt not built (Qt GUI required, see --with-gui=qt5)" >&2
+                exit 1
+            fi
             ;;
     esac
 
@@ -406,17 +481,22 @@ mkdir -p "$DISTSRC"
 
     case "$HOST" in
         *mingw*)
-            cp -rf --target-directory=. contrib/windeploy
-            (
-                cd ./windeploy
-                mkdir -p unsigned
-                cp --target-directory=unsigned/ "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
-                find . -print0 \
-                    | sort --zero-terminated \
-                    | tar --create --no-recursion --mode='u+rw,go+r-w,a+X' --null --files-from=- \
-                    | gzip -9n > "${OUTDIR}/${DISTNAME}-win64-unsigned.tar.gz" \
-                    || ( rm -f "${OUTDIR}/${DISTNAME}-win64-unsigned.tar.gz" && exit 1 )
-            )
+            if [ -f "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe" ]; then
+                cp -rf --target-directory=. contrib/windeploy
+                (
+                    cd ./windeploy
+                    mkdir -p unsigned
+                    cp --target-directory=unsigned/ "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+                    find . -print0 \
+                        | sort --zero-terminated \
+                        | tar --create --no-recursion --mode='u+rw,go+r-w,a+X' --null --files-from=- \
+                        | gzip -9n > "${OUTDIR}/${DISTNAME}-win64-unsigned.tar.gz" \
+                        || ( rm -f "${OUTDIR}/${DISTNAME}-win64-unsigned.tar.gz" && exit 1 )
+                )
+            else
+                echo "ERROR: ${DISTNAME}-win64-setup-unsigned.exe not found (Qt GUI deploy required)" >&2
+                exit 1
+            fi
             ;;
     esac
 )  # $DISTSRC

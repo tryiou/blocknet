@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <stakemgr.h>
+#include <algorithm>
 
 #include <governance/governance.h>
 #include <kernel.h>

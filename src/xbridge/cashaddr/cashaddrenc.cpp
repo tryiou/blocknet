@@ -4,6 +4,7 @@
 
 // https://github.com/Bitcoin-ABC/bitcoin-abc/blob/0edc1fe896afc15478d4031582c93e2fe0dbb0ee/src/cashaddrenc.cpp#L14
 #include <xbridge/cashaddr/cashaddrenc.h>
+#include <iterator>
 
 #include <pubkey.h>
 #include <script/script.h>

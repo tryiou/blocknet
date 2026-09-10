@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <script/descriptor.h>
+#include <algorithm>
+#include <iterator>
 
 #include <key_io.h>
 #include <pubkey.h>

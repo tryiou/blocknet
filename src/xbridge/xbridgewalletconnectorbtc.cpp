@@ -6,6 +6,8 @@
 //*****************************************************************************
 
 #include <xbridge/xbridgewalletconnectorbtc.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xbridge/util/logger.h>
 #include <xbridge/util/xutil.h>

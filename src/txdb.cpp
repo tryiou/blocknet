@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <txdb.h>
+#include <algorithm>
 
 #include <chainparams.h>
 #include <hash.h>

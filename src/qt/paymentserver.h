@@ -44,6 +44,11 @@
 #include <QObject>
 #include <QString>
 
+// Ensure QT_NO_SSL is visible to both compiler and moc when Qt is built with -no-openssl
+// Note: use <qtnetwork-config.h> (not <QtNetwork/qtnetwork-config.h>) so moc finds it
+// with the existing -I.../include/QtNetwork path
+#include <qtnetwork-config.h>
+
 class OptionsModel;
 
 QT_BEGIN_NAMESPACE

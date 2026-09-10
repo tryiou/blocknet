@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <hash.h>
+#include <algorithm>
 #include <kernel.h>
 #include <script/interpreter.h>
 #include <util/system.h>

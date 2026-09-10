@@ -6,9 +6,13 @@
 export LC_ALL=C
 set -e
 
-INPUTFILE="Xcode_7.3.1.dmg"
+# Modern Xcode (>= 15) ships a .xip, not a .dmg with 5.hfs; prefer the
+# documented flow in doc/build-osx.md (xcrun --show-sdk-path + tar).
+# Kept values below only as legacy hints — update INPUTFILE/SDKDIR to
+# match your Xcode, e.g. Xcode_15.xip / MacOSX14.x.sdk.
+INPUTFILE="Xcode_15.xip"
 HFSFILENAME="5.hfs"
-SDKDIR="Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk"
+SDKDIR="Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.sdk"
 
 7z x "${INPUTFILE}" "${HFSFILENAME}"
 SDKNAME="$(basename "${SDKDIR}")"

@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <httpserver.h>
+#include <algorithm>
 
 #include <chainparamsbase.h>
 #include <compat.h>
@@ -14,7 +15,9 @@
 #include <sync.h>
 #include <ui_interface.h>
 
+#include <deque>
 #include <memory>
+#include <queue>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

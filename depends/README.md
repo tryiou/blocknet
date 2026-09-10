@@ -18,53 +18,83 @@ created. To use it for Bitcoin:
 
     ./configure --prefix=`pwd`/depends/x86_64-w64-mingw32
 
-Common `host-platform-triplets` for cross compilation are (CI pins in `.github/workflows/ci.yml`):
+Supported `host-platform-triplets` (only 64-bit; 32-bit `i686`/`armhf`, `mips`, `powerpc`, `riscv32` removed):
 
-- `i686-w64-mingw32` for Win32 (legacy)
-- `x86_64-w64-mingw32` for Win64 — CI `windows-2022`
-- `aarch64-w64-mingw32` for Win ARM64 — CI `windows-11-arm` (experimental, needs `qt` arm64 patch)
-- `x86_64-apple-darwin` / `arm64-apple-darwin` for macOS — CI `macos-15-intel` / `macos-15` (SDK 14.5/15.2, not 10.11)
-- `arm-linux-gnueabihf` for Linux ARM 32 bit (legacy)
-- `aarch64-linux-gnu` for Linux ARM 64 bit — CI `ubuntu-24.04-arm`
-- `x86_64-linux-gnu` / `x86_64-pc-linux-gnu` for Linux x64 — CI `ubuntu-22.04`
-- `riscv32-linux-gnu` / `riscv64-linux-gnu` for RISC-V (kept, not in CI matrix)
+- `x86_64-w64-mingw32` for Win64 (Guix, llvm-mingw Clang, `--with-gui=qt5` required)
+- `aarch64-w64-mingw32` for Win ARM64 (Guix, llvm-mingw Clang, `--with-gui=qt5` required)
+- `x86_64-apple-darwin` / `arm64-apple-darwin` for macOS (requires Apple SDK 14 + `SDK_PATH`, see below)
+- `aarch64-linux-gnu` for Linux ARM 64 bit
+- `x86_64-linux-gnu` / `x86_64-pc-linux-gnu` for Linux x64
 
 No other options are needed, the paths are automatically configured.
 
+### Windows (`x86_64` + `aarch64-w64-mingw32`) — one toolchain: llvm-mingw (Clang), Qt5 GUI
+
+All Windows hosts use the single pinned `llvm-mingw` toolchain
+(`contrib/guix/manifest.scm`: `llvm-mingw-toolchain`, release `20260908`,
+LLVM 23.1.1, UCRT). Rationale: stock GCC has no `aarch64-w64-mingw32`
+target (`gcc/config.gcc`: only `i*86/x86_64-*-mingw*`; verified:
+`Configuration aarch64-w64-mingw32 not supported`), so ARM64 required a
+non-GCC toolchain — and running two compilers for one OS doubles every
+future Windows diagnosis, dep bump, and Qt quirk. One toolchain also
+matches the ecosystem direction (Qt's own MinGW→LLVM migration,
+QTBUG-107516; MSYS2 `CLANG64`/`CLANGARM64` ship production Qt 5.15 built
+with `win32-clang-g++`; hebasto's `bitcoin-core-nightly`
+`windows-llvm-*.yml` cross-builds both arches with the same toolchain;
+Bitcoin upstream conditions win-ARM64 on serving both arches,
+`bitcoin/bitcoin#31388`). Side effect: Win64 moved MSVCRT→UCRT with the
+toolchain. Consequences, all handled in-tree:
+
+- Qt uses `-xplatform win32-clang-g++` for all mingw hosts
+  (`depends/packages/qt.mk`, single `mingw32` block); OpenSSL x64 keeps
+  its `mingw64` config (compiler-agnostic) while aarch64 uses the
+  backported `mingwarm64` target
+  (`depends/patches/openssl/mingwarm64-target.patch`).
+- Everything (Qt, Boost, our code) builds against **libc++**, not
+  libstdc++: sources must include what they use (`<iterator>`,
+  `<algorithm>`, `<new>`, ...). libstdc++-transitive includes do not exist
+  here. See `depends/patches/zeromq/`, `depends/patches/bdb/`.
+- zeromq needs `__builtin_readcyclecounter()` for ARM64 (`rdtsc` is x86-only
+  and llvm-mingw has no `clock_gettime`); BDB needs the `yield` spin hint
+  (`depends/patches/bdb/winarm64-mutex-pause.patch`). Both patches are
+  arch-guarded, so x86_64 builds take the original paths.
+- `build.sh` scrubs Guix's native `CPLUS_INCLUDE_PATH`/`C_INCLUDE_PATH`
+  for the two Clang drivers only (via `depends/llvm-shims/`, regenerated
+  each run, git-ignored): Clang searches those *before* its own libc++,
+  while native `g++` probes (e.g. protobuf's `CXX_FOR_BUILD`) still need
+  them. `configure.ac` probes libzmq with `-DZMQ_STATIC` (lld is strict
+  about `dllimport`; GNU ld tolerates it).
+- The `llvm-mingw` input is a hash-pinned prebuilt tarball: build outputs
+  stay reproducible, but the toolchain blob itself is not bootstrappable
+  (same trade-off Bitcoin Core weighs in `bitcoin/bitcoin#31388`).
+
+Both Windows hosts are full matrix members (see `release.yml`). No GCC
+mingw path remains; the old `make-mingw-pthreads-cross-toolchain` /
+`mingw-w64-base-gcc` machinery was deleted from `manifest.scm`.
+
 ### Install the required dependencies: Ubuntu & Debian (22.04 jammy / 24.04 noble)
 
-> CI: `ubuntu-22.04` (x64) + `ubuntu-24.04-arm` (aarch64) (see `ci.yml`). Releases via Guix on `ubuntu-22.04` with glibc 2.27 floor (`--enable-glibc-back-compat`, Docker `FROM ubuntu:22.04`).
+> Releases via Guix inside Docker `FROM ubuntu:22.04` (Guix stock `glibc 2.35` floor). C++17 required.
 
-#### For macOS cross compilation (SDK 14.5/15.2 — old 10.11 deprecated)
+#### For macOS cross compilation (SDK 14 / Xcode 15, LLD-based toolchain)
 
     sudo apt-get install curl librsvg2-bin libtiff-tools bsdmainutils cmake imagemagick libcap-dev libz-dev libbz2-dev python3-setuptools
-    # plus: automake libtool pkg-config; SDK in depends/SDKs/ (see release.yml / contrib/guix)
+    # plus: automake libtool pkg-config clang lld llvm; SDK in depends/SDKs/ (see release.yml / contrib/guix)
+    # SDK layout: depends/SDKs/Xcode-<ver>-<build>-extracted-SDK-with-libcxx-headers (see depends/hosts/darwin.mk)
 
-#### For Win32/Win64/WinARM64 cross compilation
+#### For Win64/WinARM64 cross compilation
 
 - see [build-windows.md](../doc/build-windows.md#cross-compilation-for-ubuntu-and-windows-subsystem-for-linux)
-- CI: `windows-2022` (x64) + `windows-11-arm` (arm64 via `aarch64-w64-mingw32`, experimental)
 
-#### For linux (including i386, ARM) cross compilation
+#### For linux (including AARCH64) cross compilation
 
 Common linux dependencies:
 
     sudo apt-get install make automake cmake curl g++-multilib libtool binutils-gold bsdmainutils pkg-config python3 patch
 
-For linux ARM cross compilation:
-
-    sudo apt-get install g++-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
-
 For linux AARCH64 cross compilation:
 
     sudo apt-get install g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-
-For linux RISC-V 64-bit cross compilation (there are no packages for 32-bit):
-
-    sudo apt-get install g++-riscv64-linux-gnu binutils-riscv64-linux-gnu
-
-RISC-V known issue: gcc-7.3.0 and gcc-7.3.1 result in a broken `test_bitcoin` executable (see https://github.com/bitcoin/bitcoin/pull/13543),
-this is apparently fixed in gcc-8.1.0.
 
 ### Dependency Options
 The following can be set when running make: make FOO=bar

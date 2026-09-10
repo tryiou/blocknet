@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xrouter/xrouterutils.h>
+#include <algorithm>
 
 #include <xbridge/xbridgeapp.h>
 #include <xbridge/xbridgewallet.h>

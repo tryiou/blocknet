@@ -6,6 +6,8 @@
 //*****************************************************************************
 
 #include <xbridge/util/xutil.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xbridge/xbridgetransactiondescr.h>
 
@@ -24,8 +26,9 @@
 #include <boost/archive/iterators/ostream_iterator.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/time_facet.hpp>
-#include <boost/locale.hpp>
 #include <boost/numeric/conversion/cast.hpp>
+// NOTE: boost/locale.hpp intentionally NOT included; mb_string() is
+// self-contained (see below) so libboost_locale is not required.
 
 #ifndef WIN32
 #include <execinfo.h>
@@ -103,7 +106,57 @@ std::string mb_string(std::string const &s)
 //******************************************************************************
 std::string mb_string(std::wstring const &s)
 {
-    return boost::locale::conv::utf_to_utf<char>(s);
+    // Self-contained wchar_t -> UTF-8 converter (replaces
+    // boost::locale::conv::utf_to_utf<char>, dropping the boost_locale
+    // link dependency). Handles both UTF-32 (Linux/macOS) and UTF-16
+    // with surrogate pairs (Windows); invalid sequences become U+FFFD
+    // instead of throwing.
+    std::string out;
+    out.reserve(s.size());
+    auto push_utf8 = [&out](uint32_t cp) {
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    };
+    for (size_t i = 0; i < s.size();) {
+        uint32_t cp;
+        if (sizeof(wchar_t) > 2) {
+            // UTF-32: lone surrogates are invalid.
+            cp = static_cast<uint32_t>(s[i++]);
+            if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;
+            if (cp > 0x10FFFF) cp = 0xFFFD;
+        } else {
+            // UTF-16: combine surrogate pairs.
+            uint32_t hi = static_cast<uint32_t>(s[i++]);
+            if (hi >= 0xD800 && hi <= 0xDBFF && i < s.size()) {
+                uint32_t lo = static_cast<uint32_t>(s[i]);
+                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                    ++i;
+                    cp = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
+                } else {
+                    cp = 0xFFFD;
+                }
+            } else if (hi >= 0xDC00 && hi <= 0xDFFF) {
+                cp = 0xFFFD;
+            } else {
+                cp = hi;
+            }
+        }
+        push_utf8(cp);
+    }
+    return out;
 }
 
 //*****************************************************************************

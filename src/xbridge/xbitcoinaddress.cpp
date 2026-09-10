@@ -9,7 +9,7 @@
 #include <xbridge/xbitcoinaddress.h>
 
 #include <base58.h>
-#include <openssl/crypto.h>
+#include <support/cleanse.h>
 
 namespace xbridge
 {
@@ -46,7 +46,7 @@ bool CBase58Data::SetString(const char* psz, unsigned int nVersionBytes)
     vchData.resize(vchTemp.size() - nVersionBytes);
     if (!vchData.empty())
         memcpy(&vchData[0], &vchTemp[nVersionBytes], vchData.size());
-    OPENSSL_cleanse(&vchTemp[0], vchData.size());
+    memory_cleanse(&vchTemp[0], vchData.size());
     return true;
 }
 

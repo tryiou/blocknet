@@ -104,73 +104,45 @@ Other commands:
 Notes
 -----
 
-* Tested on OS X 10.10 Yosemite through macOS 10.13 High Sierra on 64-bit Intel processors only.
+* Tested on macOS 13+ (x86_64 and arm64). Minimum deployment target 11.0 (see `depends/hosts/darwin.mk`).
 
 * Building with downloaded Qt binaries is not officially supported. See the notes in [#7714](https://github.com/bitcoin/bitcoin/issues/7714)
 
 Deterministic macOS DMG Notes
 -----------------------------
 
-Working macOS DMGs are created in Linux by combining a recent clang,
-the Apple binutils (ld, ar, etc) and DMG authoring tools.
+Working macOS DMGs are created in Linux by combining a recent clang/LLVM,
+the LLD linker (`-fuse-ld=lld`, `-mlinker-version=711`) and DMG authoring tools.
+See `depends/hosts/darwin.mk`:
+`OSX_MIN_VERSION=11.0`, `OSX_SDK_VERSION=14.0`, `XCODE_VERSION=15.0`.
 
 Apple uses clang extensively for development and has upstreamed the necessary
 functionality so that a vanilla clang can take advantage. It supports the use
 of -F, -target, -mmacosx-version-min, and --sysroot, which are all necessary
 when building for macOS.
 
-Apple's version of binutils (called cctools) contains lots of functionality
-missing in the FSF's binutils. In addition to extra linker options for
-frameworks and sysroots, several other tools are needed as well such as
-install_name_tool, lipo, and nmedit. These do not build under linux, so they
-have been patched to do so. The work here was used as a starting point:
-[mingwandroid/toolchain4](https://github.com/mingwandroid/toolchain4).
-
-In order to build a working toolchain, the following source packages are needed
-from Apple: cctools, dyld, and ld64.
-
 These tools inject timestamps by default, which produce non-deterministic
 binaries. The ZERO_AR_DATE environment variable is used to disable that.
 
-This version of cctools has been patched to use the current version of clang's
-headers and its libLTO.so rather than those from llvmgcc, as it was
-originally done in toolchain4.
+All builds must target an Apple SDK. These SDKs are free to download, but not
+redistributable. Register for a developer account, download Xcode 15, and
+extract the SDK (see `contrib/macdeploy/README.md#sdk-extraction`).
+Place it at:
 
-To complicate things further, all builds must target an Apple SDK. These SDKs
-are free to download, but not redistributable.
-To obtain it, register for a developer account, then download the [Xcode 7.3.1 dmg](https://developer.apple.com/devcenter/download.action?path=/Developer_Tools/Xcode_7.3.1/Xcode_7.3.1.dmg).
-
-This file is several gigabytes in size, but only a single directory inside is
-needed:
 ```
-Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk
+depends/SDKs/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers
 ```
 
-Unfortunately, the usual linux tools (7zip, hpmount, loopback mount) are incapable of opening this file.
-To create a tarball suitable for Gitian input, there are two options:
+(the exact name must match `depends/hosts/darwin.mk`, or set `SDK_PATH`).
+On macOS, find your local SDK with `xcrun --show-sdk-path` and create the
+tarball with:
 
-Using macOS, you can mount the dmg, and then create it with:
 ```
-  $ hdiutil attach Xcode_7.3.1.dmg
-  $ tar -C /Volumes/Xcode/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/ -czf MacOSX10.11.sdk.tar.gz MacOSX10.11.sdk
-```
-
-Alternatively, you can use 7zip and SleuthKit to extract the files one by one.
-The script contrib/macdeploy/extract-osx-sdk.sh automates this. First ensure
-the dmg file is in the current directory, and then run the script. You may wish
-to delete the intermediate 5.hfs file and MacOSX10.11.sdk (the directory) when
-you've confirmed the extraction succeeded.
-
-```bash
-apt-get install p7zip-full sleuthkit
-contrib/macdeploy/extract-osx-sdk.sh
-rm -rf 5.hfs MacOSX10.11.sdk
+  $ tar -C $(dirname $(xcrun --show-sdk-path)) -czf <sdk-name>.tar.gz <sdk-name>
 ```
 
-The Gitian descriptors build 2 sets of files: Linux tools, then Apple binaries
-which are created using these tools. The build process has been designed to
-avoid including the SDK's files in Gitian's outputs. All interim tarballs are
-fully deterministic and may be freely redistributed.
+The Guix build (`contrib/guix/guix-build`) skips darwin hosts with a warning
+when no SDK is present; provide one to enable FULL macOS builds.
 
 genisoimage is used to create the initial DMG. It is not deterministic as-is,
 so it has been patched. A system genisoimage will work fine, but it will not

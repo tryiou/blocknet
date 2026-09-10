@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <util/system.h>
+#include <algorithm>
 #include <util/time.h>
 #include <validation.h>
 

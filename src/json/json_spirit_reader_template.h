@@ -18,6 +18,7 @@
 #endif
 
 #include <boost/bind.hpp>
+#include <iterator>
 #include <boost/function.hpp>
 #include <boost/version.hpp>
 

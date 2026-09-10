@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/blocknetproposals.h>
+#include <algorithm>
 
 #include <qt/blocknetcheckbox.h>
 #include <qt/blocknetcreateproposal.h>

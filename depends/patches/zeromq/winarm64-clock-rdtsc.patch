@@ -1,0 +1,16 @@
+--- a/src/clock.cpp	2021-01-03 22:46:01.000000000 +0100
++++ b/src/clock.cpp	2026-09-09 17:58:04.125406964 +0200
+@@ -263,6 +263,13 @@
+     uint64_t tsc;
+     asm("\tstck\t%0\n" : "=Q"(tsc) : : "cc");
+     return tsc;
++#elif defined(__aarch64__) && defined(__clang__) && defined(_WIN32)
++    // ARM64 has no rdtsc; Clang provides the virtual counter (CNTVCT).
++    // Narrowed to Windows: other aarch64+clang targets (e.g. Linux) do
++    // have clock_gettime, so the generic fallback below stays correct
++    // there. llvm-mingw lacks clock_gettime, so the generic fallback
++    // below would fail to link here.
++    return __builtin_readcyclecounter ();
+ #else
+     struct timespec ts;
+ #if defined ZMQ_HAVE_OSX                                                       \
