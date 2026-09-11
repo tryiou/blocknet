@@ -7,7 +7,7 @@ Requires a C++17 compiler (GCC >= 9, Clang >= 10).
 | Dependency | Version used | Minimum required | CVEs | Shared | [Bundled Qt library](https://doc.qt.io/qt-5/configure-options.html#third-party-libraries) |
 | --- | --- | --- | --- | --- | --- |
 | Berkeley DB | [4.8.30](https://www.oracle.com/technetwork/database/database-technologies/berkeleydb/downloads/index.html) | 4.8.x | No |  |  |
-| Boost | [1.81.0](https://boostorg.jfrog.io/artifactory/main/release/1.81.0/source/) | [1.73.0](https://github.com/bitcoin/bitcoin/pull/29066) | No |  |  |
+| Boost | [1.81.0](https://archives.boost.io/release/1.81.0/source/) | [1.73.0](https://github.com/boostorg/boost) | No |  |  |
 | Clang |  | [10.0+](https://llvm.org/releases/download.html) (C++17 support) |  |  |  |
 | D-Bus | [1.10.18](https://cgit.freedesktop.org/dbus/dbus/tree/NEWS?h=dbus-1.10) |  | No | Yes |  |
 | Expat | [2.4.8](https://libexpat.github.io/) |  | No | Yes |  |
