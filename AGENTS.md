@@ -50,8 +50,7 @@ make -j$(nproc)
 
 - `.github/workflows/ci.yml` — canonical CI (Guix 6-host matrix + native-sanity container build + lint).
 - `.github/workflows/release.yml` — canonical release flow.
-- `.github/workflows/build.yml` and `publish.yml` — **deprecated no-op shims**; ignore them.
-- Gitian was fully removed from this tree (`contrib/gitian-keys/` was deleted with the modernization pass); don't reintroduce it.
+- Gitian was fully removed from this tree (verify-commits/verifybinaries/gitian-keys and build_msvc were deleted with the modernization pass); don't reintroduce them.
 - `master` = stable (tracks latest release); `dev` = development branch.
 - Prior session plans live in `.opencode/plans/` — check there before redoing in-flight build/release work.
 
