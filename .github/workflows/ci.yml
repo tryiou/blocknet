@@ -120,16 +120,20 @@ jobs:
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
-            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates ccache bison > /dev/null
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates ccache bison curl > /dev/null
             git config --global --add safe.directory /blocknet
-            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
-            ./autogen.sh > /tmp/autogen.log 2>&1
-            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --enable-reduce-exports --with-gui=qt5 > /tmp/configure.log 2>&1 || (cat config.log; exit 1)
-            make -j$(nproc) > /tmp/make.log 2>&1; echo "make EXIT:$?"
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu > depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --enable-reduce-exports --with-gui=qt5 > configure.log 2>&1 || { tail -n 80 configure.log; tail -n 80 config.log; exit 1; }
+            make -j$(nproc) > make.log 2>&1; echo "make EXIT:$?"
           '
       - name: Show logs on failure
         if: failure()
-        run: cat /tmp/depends.log 2>/dev/null | tail -n 30 || true; cat /tmp/configure.log 2>/dev/null | tail -n 30 || true
+        run: |
+          tail -n 40 depends.log 2>/dev/null || true
+          tail -n 40 autogen.log 2>/dev/null || true
+          tail -n 40 configure.log 2>/dev/null || true
+          tail -n 60 make.log 2>/dev/null || true
 
   # ──────────────────────────────────────────────────────────────
   # Unit tests — build once natively in the pinned container and run
@@ -146,33 +150,36 @@ jobs:
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
-            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates bison > /dev/null
+            export LC_ALL=C.UTF-8
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates bison bsdmainutils curl > /dev/null
             git config --global --add safe.directory /blocknet
-            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
-            ./autogen.sh > /tmp/autogen.log 2>&1
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
             # NO_GUI: unit tests do not need Qt; keeps the job fast
-            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui > /tmp/configure.log 2>&1 || (cat config.log; exit 1)
-            make -j$(nproc) > /tmp/make.log 2>&1; echo "make EXIT:$?"
-            make check > /tmp/check.log 2>&1; echo "check EXIT:$?"
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui > configure.log 2>&1 || { tail -n 80 configure.log; tail -n 80 config.log; exit 1; }
+            make -j$(nproc) > make.log 2>&1 || { tail -n 80 make.log; exit 1; }
+            echo "make EXIT:0"
+            make check > check.log 2>&1; echo "check EXIT:$?"
           '
       - name: Show test results
         if: always()
         run: |
-          tail -n 40 /tmp/check.log 2>/dev/null || true
+          tail -n 40 check.log 2>/dev/null || true
           grep -rL "No errors detected" src/test/*.log src/wallet/test/*.log 2>/dev/null | while read -r f; do echo "=== FAILURES in $f ==="; tail -n 20 "$f"; done || true
       - name: Show build logs on failure
         if: failure()
         run: |
-          tail -n 40 /tmp/depends.log 2>/dev/null || true
-          tail -n 40 /tmp/configure.log 2>/dev/null || true
-          tail -n 60 /tmp/make.log 2>/dev/null || true
+          tail -n 40 depends.log 2>/dev/null || true
+          tail -n 40 autogen.log 2>/dev/null || true
+          tail -n 40 configure.log 2>/dev/null || true
+          tail -n 60 make.log 2>/dev/null || true
       - name: Upload test logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-logs
           path: |
-            /tmp/check.log
+            check.log
             src/test/*.log
             src/wallet/test/*.log
           if-no-files-found: warn
@@ -192,29 +199,33 @@ jobs:
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
-            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 python3-pip git ca-certificates bison > /dev/null
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 python3-pip git ca-certificates bison bsdmainutils curl > /dev/null
             git config --global --add safe.directory /blocknet
             pip3 install --quiet pyzmq 2>/dev/null || true
-            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
-            ./autogen.sh > /tmp/autogen.log 2>&1
-            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui --disable-wallet > /tmp/configure.log 2>&1 || (cat config.log; exit 1)
-            make -j$(nproc) src/blocknetd src/blocknet-cli > /tmp/make.log 2>&1; echo "make EXIT:$?"
-            test/functional/test_runner.py feature_help.py rpc_help.py feature_blocksdir.py interface_http.py > /tmp/functional.log 2>&1; echo "functional EXIT:$?"
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui --disable-wallet > configure.log 2>&1 || { tail -n 80 configure.log; tail -n 80 config.log; exit 1; }
+            make -j$(nproc) src/blocknetd src/blocknet-cli > make.log 2>&1 || { tail -n 80 make.log; exit 1; }
+            echo "make EXIT:0"
+            test/functional/test_runner.py feature_help.py rpc_help.py feature_blocksdir.py interface_http.py > functional.log 2>&1 || { tail -n 100 functional.log; exit 1; }
+            echo "functional EXIT:0"
           '
       - name: Show functional results
         if: always()
-        run: tail -n 60 /tmp/functional.log 2>/dev/null || true
+        run: tail -n 60 functional.log 2>/dev/null || true
       - name: Show build logs on failure
         if: failure()
         run: |
-          tail -n 40 /tmp/depends.log 2>/dev/null || true
-          tail -n 60 /tmp/make.log 2>/dev/null || true
+          tail -n 40 depends.log 2>/dev/null || true
+          tail -n 40 autogen.log 2>/dev/null || true
+          tail -n 40 configure.log 2>/dev/null || true
+          tail -n 60 make.log 2>/dev/null || true
       - name: Upload functional logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: functional-smoke-logs
-          path: /tmp/functional.log
+          path: functional.log
           if-no-files-found: warn
           retention-days: 7
 
