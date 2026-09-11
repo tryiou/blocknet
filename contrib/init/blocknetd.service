@@ -1,47 +1,47 @@
 # It is not recommended to modify this file in-place, because it will
 # be overwritten during package upgrades. If you want to add further
 # options or overwrite existing ones then use
-# $ systemctl edit bitcoind.service
+# $ systemctl edit blocknetd.service
 # See "man systemd.service" for details.
 
 # Note that almost all daemon options could be specified in
-# /etc/bitcoin/bitcoin.conf, except for those explicitly specified as arguments
+# /etc/blocknet/blocknet.conf, except for those explicitly specified as arguments
 # in ExecStart=
 
 [Unit]
-Description=Bitcoin daemon
+Description=Blocknet daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/bitcoind -daemon \
-                            -pid=/run/bitcoind/bitcoind.pid \
-                            -conf=/etc/bitcoin/bitcoin.conf \
-                            -datadir=/var/lib/bitcoind
+ExecStart=/usr/bin/blocknetd -daemon \
+                            -pid=/run/blocknetd/blocknetd.pid \
+                            -conf=/etc/blocknet/blocknet.conf \
+                            -datadir=/var/lib/blocknetd
 
 # Process management
 ####################
 
 Type=forking
-PIDFile=/run/bitcoind/bitcoind.pid
+PIDFile=/run/blocknetd/blocknetd.pid
 Restart=on-failure
 
 # Directory creation and permissions
 ####################################
 
 # Run as bitcoin:bitcoin
-User=bitcoin
-Group=bitcoin
+User=blocknet
+Group=blocknet
 
-# /run/bitcoind
-RuntimeDirectory=bitcoind
+# /run/blocknetd
+RuntimeDirectory=blocknetd
 RuntimeDirectoryMode=0710
 
-# /etc/bitcoin
-ConfigurationDirectory=bitcoin
+# /etc/blocknet
+ConfigurationDirectory=blocknet
 ConfigurationDirectoryMode=0710
 
-# /var/lib/bitcoind
-StateDirectory=bitcoind
+# /var/lib/blocknetd
+StateDirectory=blocknetd
 StateDirectoryMode=0710
 
 # Hardening measures

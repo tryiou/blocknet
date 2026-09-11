@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+#  blocknetd The bitcoin core server.
+#
+#
+# chkconfig: 345 80 20
+# description: blocknetd
+# processname: blocknetd
+#
+
+# Source function library.
+. /etc/init.d/functions
+
+# you can override defaults in /etc/sysconfig/blocknetd, see below
+if [ -f /etc/sysconfig/blocknetd ]; then
+        . /etc/sysconfig/blocknetd
+fi
+
+RETVAL=0
+
+prog=blocknetd
+# you can override the lockfile via BLOCKNETD_LOCKFILE in /etc/sysconfig/blocknetd
+lockfile=${BLOCKNETD_LOCKFILE-/var/lock/subsys/blocknetd}
+
+# blocknetd defaults to /usr/bin/blocknetd, override with BLOCKNETD_BIN
+blocknetd=${BLOCKNETD_BIN-/usr/bin/blocknetd}
+
+# blocknetd opts default to -disablewallet, override with BLOCKNETD_OPTS
+blocknetd_opts=${BLOCKNETD_OPTS--disablewallet}
+
+start() {
+    echo -n $"Starting $prog: "
+    daemon $DAEMONOPTS $blocknetd $blocknetd_opts
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && touch $lockfile
+    return $RETVAL
+}
+
+stop() {
+    echo -n $"Stopping $prog: "
+    killproc $prog
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && rm -f $lockfile
+    return $RETVAL
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status $prog
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    *)
+        echo "Usage: service $prog {start|stop|status|restart}"
+        exit 1
+        ;;
+esac

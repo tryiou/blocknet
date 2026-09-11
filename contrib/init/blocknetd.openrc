@@ -1,0 +1,92 @@
+#!/sbin/openrc-run
+
+# backward compatibility for existing gentoo layout 
+#
+if [ -d "/var/lib/blocknet/.blocknet" ]; then
+	BLOCKNETD_DEFAULT_DATADIR="/var/lib/blocknet/.blocknet"
+else
+	BLOCKNETD_DEFAULT_DATADIR="/var/lib/blocknetd"
+fi
+
+BLOCKNETD_CONFIGFILE=${BLOCKNETD_CONFIGFILE:-/etc/blocknet/blocknet.conf}
+BLOCKNETD_PIDDIR=${BLOCKNETD_PIDDIR:-/var/run/blocknetd}
+BLOCKNETD_PIDFILE=${BLOCKNETD_PIDFILE:-${BLOCKNETD_PIDDIR}/blocknetd.pid}
+BLOCKNETD_DATADIR=${BLOCKNETD_DATADIR:-${BLOCKNETD_DEFAULT_DATADIR}}
+BLOCKNETD_USER=${BLOCKNETD_USER:-${BITCOIN_USER:-bitcoin}}
+BLOCKNETD_GROUP=${BLOCKNETD_GROUP:-bitcoin}
+BLOCKNETD_BIN=${BLOCKNETD_BIN:-/usr/bin/blocknetd}
+BLOCKNETD_NICE=${BLOCKNETD_NICE:-${NICELEVEL:-0}}
+BLOCKNETD_OPTS="${BLOCKNETD_OPTS:-${BITCOIN_OPTS}}"
+
+name="Bitcoin Core Daemon"
+description="Bitcoin cryptocurrency P2P network daemon"
+
+command="/usr/bin/blocknetd"
+command_args="-pid=\"${BLOCKNETD_PIDFILE}\" \
+		-conf=\"${BLOCKNETD_CONFIGFILE}\" \
+		-datadir=\"${BLOCKNETD_DATADIR}\" \
+		-daemon \
+		${BLOCKNETD_OPTS}"
+
+required_files="${BLOCKNETD_CONFIGFILE}"
+start_stop_daemon_args="-u ${BLOCKNETD_USER} \
+			-N ${BLOCKNETD_NICE} -w 2000"
+pidfile="${BLOCKNETD_PIDFILE}"
+
+# The retry schedule to use when stopping the daemon. Could be either
+# a timeout in seconds or multiple signal/timeout pairs (like
+# "SIGKILL/180 SIGTERM/300")
+retry="${BLOCKNETD_SIGTERM_TIMEOUT}"
+
+depend() {
+	need localmount net
+}
+
+# verify
+# 1) that the datadir exists and is writable (or create it)
+# 2) that a directory for the pid exists and is writable
+# 3) ownership and permissions on the config file
+start_pre() {
+	checkpath \
+	-d \
+	--mode 0750 \
+	--owner "${BLOCKNETD_USER}:${BLOCKNETD_GROUP}" \
+	"${BLOCKNETD_DATADIR}"
+
+	checkpath \
+	-d \
+	--mode 0755 \
+	--owner "${BLOCKNETD_USER}:${BLOCKNETD_GROUP}" \
+	"${BLOCKNETD_PIDDIR}"
+
+	checkpath -f \
+	-o ${BLOCKNETD_USER}:${BLOCKNETD_GROUP} \
+	-m 0660 \
+	${BLOCKNETD_CONFIGFILE}
+
+	checkconfig || return 1
+}
+
+checkconfig()
+{
+	if ! grep -qs '^rpcpassword=' "${BLOCKNETD_CONFIGFILE}" ; then
+		eerror ""
+		eerror "ERROR: You must set a secure rpcpassword to run blocknetd."
+		eerror "The setting must appear in ${BLOCKNETD_CONFIGFILE}"
+		eerror ""
+		eerror "This password is security critical to securing wallets "
+		eerror "and must not be the same as the rpcuser setting."
+		eerror "You can generate a suitable random password using the following "
+		eerror "command from the shell:"
+		eerror ""
+		eerror "bash -c 'tr -dc a-zA-Z0-9 < /dev/urandom | head -c32 && echo'"
+		eerror ""
+		eerror "It is recommended that you also set alertnotify so you are "
+		eerror "notified of problems:"
+		eerror ""
+		eerror "ie: alertnotify=echo %%s | mail -s \"Bitcoin Alert\"" \
+			"admin@foo.com"
+		eerror ""
+		return 1
+	fi
+}
