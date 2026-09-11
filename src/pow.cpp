@@ -144,6 +144,13 @@ unsigned int BlocknetGetNextWorkRequired(const CBlockIndex* pindexLast, const Co
 {
     unsigned int nProofOfWorkLimit = UintToArith256(params.powLimit).GetCompact();
 
+    // Honor the no-retargeting flag (set on regtest). DarkGravity v3 below
+    // retargets every block; on regtest with instant mining this compounds
+    // 3x-tighter targets per block (timespan clamp), quickly making PoW
+    // unsolvable and stalling generatetoaddress mid-chain.
+    if (params.fPowNoRetargeting)
+        return pindexLast->nBits;
+
     /* current difficulty formula, DarkGravity v3, written by Evan Duffield - evan@dashpay.io */
     const CBlockIndex* BlockLastSolved = pindexLast;
     const CBlockIndex* BlockReading = pindexLast;

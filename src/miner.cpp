@@ -16,6 +16,7 @@
 #include <consensus/validation.h>
 #include <governance/governance.h>
 #include <hash.h>
+#include <kernel.h>
 #include <net.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
@@ -151,6 +152,12 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
         pblock->nVersion = gArgs.GetArg("-blockversion", pblock->nVersion);
 
     pblock->nTime = GetAdjustedTime();
+    // Blocknet PoS heights (height > lastPOWBlock) require a strictly
+    // increasing block time (block time must be greater than the previous
+    // block's). Instant regtest mining would otherwise build several blocks
+    // within the same second and fail TestBlockValidity with "time-too-old".
+    if (IsProofOfStake(nHeight, chainparams.GetConsensus()) && pblock->nTime <= pindexPrev->GetBlockTime())
+        pblock->nTime = pindexPrev->GetBlockTime() + 1;
     const int64_t nMedianTimePast = pindexPrev->GetMedianTimePast();
 
     nLockTimeCutoff = (STANDARD_LOCKTIME_VERIFY_FLAGS & LOCKTIME_MEDIAN_TIME_PAST)
