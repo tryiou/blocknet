@@ -360,7 +360,6 @@ Additional resources:
  * [UndefinedBehaviorSanitizer](https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html)
  * [GCC Instrumentation Options](https://gcc.gnu.org/onlinedocs/gcc/Instrumentation-Options.html)
  * [Google Sanitizers Wiki](https://github.com/google/sanitizers/wiki)
- * [Issue #12691: Enable -fsanitize flags in Travis](https://github.com/bitcoin/bitcoin/issues/12691)
 
 Locking/mutex usage notes
 -------------------------
@@ -392,7 +391,7 @@ Threads
 
 - ThreadMapPort : Universal plug-and-play startup/shutdown
 
-- ThreadSocketHandler : Sends/Receives data from peers on port 8333.
+- ThreadSocketHandler : Sends/Receives data from peers on port 41412.
 
 - ThreadOpenAddedConnections : Opens network connections to added nodes.
 
@@ -402,7 +401,7 @@ Threads
 
 - DumpAddresses : Dumps IP addresses of nodes to peers.dat.
 
-- ThreadRPCServer : Remote procedure call handler, listens on port 8332 for connections and services them.
+- ThreadRPCServer : Remote procedure call handler, listens on port 41414 for connections and services them.
 
 - Shutdown : Does an orderly shutdown of everything.
 
@@ -452,7 +451,7 @@ General Bitcoin Core
   - *Rationale*: RPC allows for better automatic testing. The test suite for
     the GUI is very limited
 
-- Make sure pull requests pass Travis CI before merging
+- Make sure pull requests pass GitHub Actions CI before merging
 
   - *Rationale*: Makes sure that they pass thorough testing, and that the tester will keep passing
      on the master branch. Otherwise all new pull requests will start failing the tests, resulting in
@@ -848,7 +847,7 @@ Scripted diffs
 --------------
 
 For reformatting and refactoring commits where the changes can be easily automated using a bash script, we use
-scripted-diff commits. The bash script is included in the commit message and our Travis CI job checks that
+scripted-diff commits. The bash script is included in the commit message and `test/lint/commit-script-check.sh` checks that
 the result of the script is identical to the commit. This aids reviewers since they can verify that the script
 does exactly what it's supposed to do. It is also helpful for rebasing (since the same script can just be re-run
 on the new master commit).
