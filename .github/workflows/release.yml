@@ -94,21 +94,23 @@ jobs:
           cat SHA256SUMS || true
           exit $EXIT
 
-      - name: SHA256SUMS
+      - name: Stage SHA256SUMS and build log
         run: |
-          ls -R blocknet-binaries 2>&1 | head -n 100 || true
-          find blocknet-binaries -type f -exec sha256sum {} \; | tee SHA256SUMS || true
-          cat SHA256SUMS || true
+          # Stage everything into one root dir so the artifact layout is
+          # predictable after download (upload-artifact strips the LCA):
+          # release-staging/<host>/* , release-staging/SHA256SUMS
+          mkdir -p release-staging
+          cp -a blocknet-binaries/. release-staging/
+          find release-staging -type f ! -name SHA256SUMS.part -exec sha256sum {} \; | sort -k2 > release-staging/SHA256SUMS
+          cat release-staging/SHA256SUMS
+          cp /tmp/guix-matrix.log release-staging/guix-matrix.log
 
       - name: Upload Guix artifacts
         uses: actions/upload-artifact@v4
         with:
           name: blocknet-guix-${{ steps.ver.outputs.version }}
-          path: |
-            blocknet-binaries/**
-            SHA256SUMS
-            /tmp/guix-matrix.log
-          if-no-files-found: warn
+          path: release-staging
+          if-no-files-found: error
           retention-days: 14
 
   # ──────────────────────────────────────────────────────────────
@@ -126,15 +128,14 @@ jobs:
         with:
           path: blocknet
 
-      - name: Download Guix artifacts
+      - name: Download Guix artifacts (into the build context)
         uses: actions/download-artifact@v4
         with:
           name: blocknet-guix-${{ needs.guix-build.outputs.version }}
-          path: blocknet-binaries
-        continue-on-error: true
+          path: blocknet/blocknet-binaries
 
       - name: List binaries
-        run: ls -R blocknet-binaries 2>/dev/null || ls -R blocknet/blocknet-binaries 2>/dev/null || echo "no binaries yet — docker will use placeholder"
+        run: ls -R blocknet/blocknet-binaries 2>/dev/null || { echo "no binaries downloaded"; exit 1; }
 
       - name: Docker metadata
         id: meta
@@ -199,6 +200,14 @@ jobs:
           name: blocknet-guix-${{ needs.guix-build.outputs.version }}
           path: artifacts
 
+      - name: Verify artifacts present
+        run: |
+          ls -R artifacts
+          test -f artifacts/SHA256SUMS || { echo "SHA256SUMS missing"; exit 1; }
+          count=$(find artifacts -name 'blocknet-*.tar.gz' -o -name 'blocknet-*.zip' -o -name 'blocknet-*.exe' -o -name 'blocknet-*.dmg' | wc -l)
+          echo "artifact count: $count"
+          test "$count" -gt 0 || { echo "no release artifacts found"; exit 1; }
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -206,10 +215,10 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            artifacts/blocknet-binaries/**/blocknet-*.tar.gz
-            artifacts/blocknet-binaries/**/blocknet-*.zip
-            artifacts/blocknet-binaries/**/blocknet-*.exe
-            artifacts/blocknet-binaries/**/blocknet-*.dmg
+            artifacts/**/blocknet-*.tar.gz
+            artifacts/**/blocknet-*.zip
+            artifacts/**/blocknet-*.exe
+            artifacts/**/blocknet-*.dmg
             artifacts/SHA256SUMS
-            artifacts/guix-build/**/SHA256SUMS.part

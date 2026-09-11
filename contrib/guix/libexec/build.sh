@@ -381,17 +381,25 @@ mkdir -p "$DISTSRC"
     case "$HOST" in
         *mingw*)
             if [ -f src/qt/blocknet-qt.exe ] || [ -f src/qt/bitcoin-qt.exe ] || [ -f src/qt/qt/blocknet-qt.exe ]; then
-                make deploy ${V:+V=1} BITCOIN_WIN_INSTALLER="${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+                # Host-qualify the installer basename: both mingw hosts would
+                # otherwise produce identical "-win64-setup-unsigned.exe"
+                # names and collide in the release assets. x86_64 keeps the
+                # historical "-win64" name; aarch64 uses "-win-arm64".
+                case "$HOST" in
+                    aarch64-w64-mingw32) _win_tag="win-arm64" ;;
+                    *)                   _win_tag="win64" ;;
+                esac
+                make deploy ${V:+V=1} BITCOIN_WIN_INSTALLER="${OUTDIR}/${DISTNAME}-${_win_tag}-setup-unsigned.exe"
                 # NOTE: setup.nsi's OutFile is baked at configure time
                 # (@abs_top_srcdir@/...-win-setup.exe), so makensis writes next
                 # to the source tree, NOT to BITCOIN_WIN_INSTALLER (the Makefile
                 # only echoes that name). Relocate to the canonical unsigned name.
-                for _nsi_out in ./*-win64-setup.exe; do
+                for _nsi_out in ./*-win64-setup.exe ./*-win-arm64-setup.exe; do
                     if [ -f "$_nsi_out" ]; then
-                        mv -f "$_nsi_out" "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+                        mv -f "$_nsi_out" "${OUTDIR}/${DISTNAME}-${_win_tag}-setup-unsigned.exe"
                     fi
                 done
-                unset _nsi_out
+                unset _nsi_out _win_tag
             else
                 echo "ERROR: blocknet-qt.exe not built (Qt GUI required, see --with-gui=qt5)" >&2
                 exit 1
@@ -488,16 +496,21 @@ mkdir -p "$DISTSRC"
             *mingw*)
                 find "${DISTNAME}" -not -name "*.dbg" -print0 \
                     | xargs -0r touch --no-dereference --date="@${SOURCE_DATE_EPOCH}"
+                case "$HOST" in
+                    aarch64-w64-mingw32) _win_tag="win-arm64" ;;
+                    *)                   _win_tag="win64" ;;
+                esac
                 find "${DISTNAME}" -not -name "*.dbg" \
                     | sort \
-                    | zip -X@ "${OUTDIR}/${DISTNAME}-${HOST//x86_64-w64-mingw32/win64}.zip" \
-                    || ( rm -f "${OUTDIR}/${DISTNAME}-${HOST//x86_64-w64-mingw32/win64}.zip" && exit 1 )
+                    | zip -X@ "${OUTDIR}/${DISTNAME}-${_win_tag}.zip" \
+                    || ( rm -f "${OUTDIR}/${DISTNAME}-${_win_tag}.zip" && exit 1 )
                 find "${DISTNAME}" -name "*.dbg" -print0 \
                     | xargs -0r touch --no-dereference --date="@${SOURCE_DATE_EPOCH}"
                 find "${DISTNAME}" -name "*.dbg" \
                     | sort \
-                    | zip -X@ "${OUTDIR}/${DISTNAME}-${HOST//x86_64-w64-mingw32/win64}-debug.zip" \
-                    || ( rm -f "${OUTDIR}/${DISTNAME}-${HOST//x86_64-w64-mingw32/win64}-debug.zip" && exit 1 )
+                    | zip -X@ "${OUTDIR}/${DISTNAME}-${_win_tag}-debug.zip" \
+                    || ( rm -f "${OUTDIR}/${DISTNAME}-${_win_tag}-debug.zip" && exit 1 )
+                unset _win_tag
                 ;;
             *linux*)
                 find "${DISTNAME}" -not -name "*.dbg" -print0 \
@@ -523,22 +536,27 @@ mkdir -p "$DISTSRC"
 
     case "$HOST" in
         *mingw*)
-            if [ -f "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe" ]; then
+            case "$HOST" in
+                aarch64-w64-mingw32) _win_tag="win-arm64" ;;
+                *)                   _win_tag="win64" ;;
+            esac
+            if [ -f "${OUTDIR}/${DISTNAME}-${_win_tag}-setup-unsigned.exe" ]; then
                 cp -rf --target-directory=. contrib/windeploy
                 (
                     cd ./windeploy
                     mkdir -p unsigned
-                    cp --target-directory=unsigned/ "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+                    cp --target-directory=unsigned/ "${OUTDIR}/${DISTNAME}-${_win_tag}-setup-unsigned.exe"
                     find . -print0 \
                         | sort --zero-terminated \
                         | tar --create --no-recursion --mode='u+rw,go+r-w,a+X' --null --files-from=- \
-                        | gzip -9n > "${OUTDIR}/${DISTNAME}-win64-unsigned.tar.gz" \
-                        || ( rm -f "${OUTDIR}/${DISTNAME}-win64-unsigned.tar.gz" && exit 1 )
+                        | gzip -9n > "${OUTDIR}/${DISTNAME}-${_win_tag}-unsigned.tar.gz" \
+                        || ( rm -f "${OUTDIR}/${DISTNAME}-${_win_tag}-unsigned.tar.gz" && exit 1 )
                 )
             else
-                echo "ERROR: ${DISTNAME}-win64-setup-unsigned.exe not found (Qt GUI deploy required)" >&2
+                echo "ERROR: ${DISTNAME}-${_win_tag}-setup-unsigned.exe not found (Qt GUI deploy required)" >&2
                 exit 1
             fi
+            unset _win_tag
             ;;
     esac
 )  # $DISTSRC

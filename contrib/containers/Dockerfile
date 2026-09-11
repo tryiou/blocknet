@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.6
-# was ubuntu:bionic (EOL) — now ubuntu:22.04 (jammy, glibc 2.35 floor per release plan)
-# CI runners are 24.04 (noble) but artifacts/Docker stay on 22.04 for broad compat.
-FROM ubuntu:22.04
+# ubuntu:22.04 (jammy, glibc 2.35 floor), digest-pinned to match the CI
+# runner base and the Guix Dockerfile (contrib/guix/Dockerfile).
+# Built by .github/workflows/release.yml with context: <repo root>;
+# the Guix artifacts are staged into blocknet-binaries/ before the build.
+FROM ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
 LABEL maintainer="Blocknet Developers <dev@blocknet.org>"
 LABEL description="Dockerised Blocknet"
 
@@ -19,7 +21,7 @@ RUN mkdir -p /opt/blockchain && \
     mkdir -p /opt/blockchain/config && \
     ln -s /opt/blockchain/config /root/.blocknet
 
-COPY blocknet-binaries/**/blocknet*linux-gnu.tar.gz /opt/blockchain
+COPY blocknet-binaries/ /opt/blockchain/binaries/
 
 RUN set -eux; \
     # Prefer TARGETARCH (buildx), fall back to uname -m for plain docker build
@@ -30,14 +32,14 @@ RUN set -eux; \
       mach=$(uname -m); \
       case "$mach" in aarch64|arm64) arch="aarch64-linux-gnu";; x86_64|amd64) arch="x86_64-linux-gnu";; *) echo "ERROR: Machine type $mach not supported"; exit 1;; esac; \
     fi; \
-    cd /opt/blockchain; \
+    cd /opt/blockchain/binaries; \
     # Pick the matching tarball; fail loudly if missing
-    set -- blocknet*"$arch".tar.gz; \
-    if [ ! -f "$1" ]; then echo "ERROR: no tarball for $arch in /opt/blockchain:"; ls -l; exit 1; fi; \
+    set -- blocknet-*-"$arch".tar.gz; \
+    if [ ! -f "$1" ]; then echo "ERROR: no tarball for $arch in $(pwd):"; ls -l; exit 1; fi; \
     tar xvzf "$1"; \
-    echo "Extracted $1 -> $(ls -1)"; \
+    echo "Extracted $1"; \
     cp blocknet-*/bin/* /usr/local/bin; \
-    rm -rf blocknet* blocknet-binaries
+    cd /opt/blockchain && rm -rf binaries
 
 # Write default blocknet.conf (can be overridden on commandline)
 RUN echo "datadir=/opt/blockchain/data    \n\
