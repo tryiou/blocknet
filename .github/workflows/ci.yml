@@ -29,18 +29,6 @@ jobs:
       matrix:
         host: [x86_64-linux-gnu, aarch64-linux-gnu, x86_64-w64-mingw32, arm64-apple-darwin, x86_64-apple-darwin]
         # aarch64-w64-mingw32 is required via the dedicated guix-matrix-win-arm64 job below
-        include:
-          - host: x86_64-linux-gnu
-            allow_failure: false
-          - host: aarch64-linux-gnu
-            allow_failure: false
-          - host: x86_64-w64-mingw32
-            allow_failure: false
-          - host: arm64-apple-darwin
-            allow_failure: false
-          - host: x86_64-apple-darwin
-            allow_failure: false
-    continue-on-error: ${{ matrix.allow_failure }}
     steps:
       - uses: actions/checkout@v4
       - name: Install macOS SDK (darwin only)
@@ -73,7 +61,11 @@ jobs:
           file blocknet-binaries/${{ matrix.host }}/* 2>&1 | head -n 20 || true
           # Artifact required when the SDK was provisioned; without an SDK
           # guix-build soft-skips darwin (upstream behavior), so tolerate that.
-          test -f blocknet-binaries/${{ matrix.host }}/*.tar.gz || test -f blocknet-binaries/${{ matrix.host }}/*.zip || { if [ -d "depends/SDKs" ] && [ -n "$(ls -A depends/SDKs 2>/dev/null)" ]; then echo "SDK present but no artifact for ${{ matrix.host }} — FAIL"; exit 1; fi; echo "no artifact for ${{ matrix.host }} (darwin without SDK skipped)"; exit 0; }
+          if [ -d "depends/SDKs" ] && [ -n "$(ls -A depends/SDKs 2>/dev/null)" ]; then
+            test -f blocknet-binaries/${{ matrix.host }}/*.tar.gz || test -f blocknet-binaries/${{ matrix.host }}/*.zip || { echo "SDK present but no artifact for ${{ matrix.host }} — FAIL"; exit 1; }
+          else
+            echo "no artifact check for ${{ matrix.host }} (SDK not provisioned)"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -93,8 +85,17 @@ jobs:
         run: DOCKER_BUILDKIT=1 docker build -f contrib/guix/Dockerfile -t blocknet-guix:22.04 .
       - name: Guix build aarch64-w64-mingw32 (required)
         run: |
+          mkdir -p blocknet-binaries
+          set -o pipefail
           HOSTS=aarch64-w64-mingw32 JOBS=$(nproc) ./contrib/guix/docker-run.sh aarch64-w64-mingw32 2>&1 | tee /tmp/guix-aarch64-w64-mingw32.log
+          EXIT=${PIPESTATUS[0]}
+          echo "EXIT:$EXIT" | tee -a /tmp/guix-aarch64-w64-mingw32.log
           ls -R blocknet-binaries 2>&1 | head -n 30
+          cat /tmp/guix-aarch64-w64-mingw32.log | tail -n 30 || true
+          exit $EXIT
+      - name: Smoke check artifact
+        run: |
+          test -f blocknet-binaries/aarch64-w64-mingw32/*.zip || test -f blocknet-binaries/aarch64-w64-mingw32/*.exe || { echo "no artifact for aarch64-w64-mingw32 — FAIL"; exit 1; }
           file blocknet-binaries/aarch64-w64-mingw32/* 2>&1 | head -n 20
       - uses: actions/upload-artifact@v4
         if: always()
@@ -129,15 +130,104 @@ jobs:
         if: failure()
         run: cat /tmp/depends.log 2>/dev/null | tail -n 30 || true; cat /tmp/configure.log 2>/dev/null | tail -n 30 || true
 
+  # ──────────────────────────────────────────────────────────────
+  # Unit tests — build once natively in the pinned container and run
+  # make check (all unit suites incl. servicenode/xbridge/xrouter/
+  # governance/staking). Functional tests are covered by the
+  # functional-smoke job below.
+  # ──────────────────────────────────────────────────────────────
+  unit-tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + run unit tests inside pinned container
+        run: |
+          docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates bison > /dev/null
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > /tmp/autogen.log 2>&1
+            # NO_GUI: unit tests do not need Qt; keeps the job fast
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui > /tmp/configure.log 2>&1 || (cat config.log; exit 1)
+            make -j$(nproc) > /tmp/make.log 2>&1; echo "make EXIT:$?"
+            make check > /tmp/check.log 2>&1; echo "check EXIT:$?"
+          '
+      - name: Show test results
+        if: always()
+        run: |
+          tail -n 40 /tmp/check.log 2>/dev/null || true
+          grep -rL "No errors detected" src/test/*.log src/wallet/test/*.log 2>/dev/null | while read -r f; do echo "=== FAILURES in $f ==="; tail -n 20 "$f"; done || true
+      - name: Show build logs on failure
+        if: failure()
+        run: |
+          tail -n 40 /tmp/depends.log 2>/dev/null || true
+          tail -n 40 /tmp/configure.log 2>/dev/null || true
+          tail -n 60 /tmp/make.log 2>/dev/null || true
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-logs
+          path: |
+            /tmp/check.log
+            src/test/*.log
+            src/wallet/test/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────
+  # Functional smoke — small, fast tests that stay under the regtest
+  # PoW ceiling (lastPOWBlock=125) and exercise the daemon's RPC/HTTP
+  # plumbing. The framework writes blocknet.conf (matching the daemon).
+  # ──────────────────────────────────────────────────────────────
+  functional-smoke:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + run functional smoke subset inside pinned container
+        run: |
+          docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 python3-pip git ca-certificates bison > /dev/null
+            pip3 install --quiet pyzmq 2>/dev/null || true
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > /tmp/autogen.log 2>&1
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui --disable-wallet > /tmp/configure.log 2>&1 || (cat config.log; exit 1)
+            make -j$(nproc) src/blocknetd src/blocknet-cli > /tmp/make.log 2>&1; echo "make EXIT:$?"
+            test/functional/test_runner.py feature_help.py rpc_help.py feature_blocksdir.py interface_http.py > /tmp/functional.log 2>&1; echo "functional EXIT:$?"
+          '
+      - name: Show functional results
+        if: always()
+        run: tail -n 60 /tmp/functional.log 2>/dev/null || true
+      - name: Show build logs on failure
+        if: failure()
+        run: |
+          tail -n 40 /tmp/depends.log 2>/dev/null || true
+          tail -n 60 /tmp/make.log 2>/dev/null || true
+      - name: Upload functional logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-smoke-logs
+          path: /tmp/functional.log
+          if-no-files-found: warn
+          retention-days: 7
+
   lint:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Shellcheck & yaml lint (inside container)
+      - name: Shellcheck, yaml lint, and repo lint checks (inside container)
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
-            apt-get update -qq && apt-get install -y --no-install-recommends shellcheck yamllint > /dev/null
-            yamllint .github/workflows/ || true
-            shellcheck contrib/*.sh contrib/**/*.sh 2>/dev/null || true
+            set -e
+            apt-get update -qq && apt-get install -y --no-install-recommends shellcheck yamllint python3 python3-pip git flake8 > /dev/null
+            pip3 install --quiet codespell 2>/dev/null || true
+            yamllint .github/workflows/
+            shellcheck contrib/*.sh contrib/**/*.sh
+            # repo lint suite (whitespace, includes, shebangs, locale, filenames, ...)
+            test/lint/lint-all.sh
           '

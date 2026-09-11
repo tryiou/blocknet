@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export LC_ALL=C
 set -e -o pipefail
 # Isolated Guix build — never touches host. Use Docker BuildKit cache + persistent store.
 # Usage: ./contrib/guix/docker-run.sh [HOSTS]  # default: x86_64-linux-gnu

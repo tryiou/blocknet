@@ -1,0 +1,18 @@
+# ShellCheck policy for this repository.
+#
+# The canonical CI lint job (ci.yml) runs `shellcheck contrib/*.sh
+# contrib/**/*.sh` as a blocking check. The codes below are style- or
+# info-level findings that are pervasive in the inherited scripts
+# (mostly install_db4.sh, macdeploy, guix libexec helpers). They are
+# tracked here instead of being fixed en masse so that *error*-level
+# findings keep blocking CI. Fix opportunistically when touching a
+# script; remove a disable here when a class of findings is cleaned up.
+disable=SC2086  # word splitting/globbing on unquoted vars (style)
+disable=SC2006  # $( ) instead of legacy backticks (style)
+disable=SC2005  # useless echo of command substitution (style)
+disable=SC2016  # single-quoted strings with intentional expansion text (info)
+disable=SC2155  # declare+assign separately (style)
+disable=SC2207  # mapfile instead of split-by-whitespace arrays (style)
+disable=SC2046  # quote command substitution to prevent splitting (info)
+disable=SC2162  # read without -r (info)
+disable=SC2236  # use -n/-z instead of ! -z / ! = "" (style)

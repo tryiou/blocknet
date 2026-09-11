@@ -98,12 +98,10 @@ EXPECTED_BOOST_INCLUDES=(
     boost/iostreams/concepts.hpp
     boost/iostreams/stream.hpp
     boost/lexical_cast.hpp
-    boost/locale.hpp
     boost/noncopyable.hpp
     boost/numeric/conversion/cast.hpp
     boost/pool/pool_alloc.hpp
     boost/preprocessor.hpp
-    boost/program_options.hpp
     boost/property_tree/ini_parser.hpp
     boost/property_tree/ptree.hpp
     boost/rational.hpp

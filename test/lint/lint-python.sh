@@ -82,7 +82,7 @@ enabled=(
     W606 # 'async' and 'await' are reserved keywords starting with Python 3.7
 )
 
-if ! command -v flake8 > /dev/null; then
+if ! flake8 --version > /dev/null 2>&1; then
     echo "Skipping Python linting since flake8 is not installed. Install by running \"pip3 install flake8\""
     exit 0
 elif PYTHONWARNINGS="ignore" flake8 --version | grep -q "Python 2"; then

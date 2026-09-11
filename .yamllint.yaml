@@ -1,0 +1,16 @@
+---
+extends: default
+
+rules:
+  # GitHub Actions commonly uses >200-char lines and oneline booleans
+  line-length:
+    max: 210
+    level: warning
+  truthy:
+    allowed-values: ["true", "false", "on", "off"]
+  comments:
+    min-spaces-from-content: 1
+  document-start:
+    present: false
+  indentation:
+    indent-sequences: consistent
