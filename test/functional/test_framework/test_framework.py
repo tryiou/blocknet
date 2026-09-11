@@ -276,7 +276,7 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
         self.import_deterministic_coinbase_privkeys()
         if not self.setup_clean_chain:
             for n in self.nodes:
-                assert_equal(n.getblockchaininfo()["blocks"], 199)
+                assert_equal(n.getblockchaininfo()["blocks"], 100)
             # To ensure that all nodes are out of IBD, the most recent block
             # must have a timestamp not too old (see IsInitialBlockDownload()).
             self.log.debug('Generate a block with current time')
@@ -285,7 +285,7 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             for n in self.nodes:
                 n.submitblock(block)
                 chain_info = n.getblockchaininfo()
-                assert_equal(chain_info["blocks"], 200)
+                assert_equal(chain_info["blocks"], 101)
                 assert_equal(chain_info["initialblockdownload"], False)
 
     def import_deterministic_coinbase_privkeys(self):
@@ -446,8 +446,13 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
     def _initialize_chain(self):
         """Initialize a pre-mined blockchain for use by the test.
 
-        Create a cache of a 199-block-long chain (with wallet) for MAX_NODES
-        Afterward, create num_nodes copies from the cache."""
+        Create a cache of a 100-block-long chain (with wallet) for MAX_NODES
+        Afterward, create num_nodes copies from the cache.
+
+        Blocknet note: regtest PoW ends at lastPOWBlock (125) and only PoS
+        blocks are accepted afterwards, which cannot be produced by
+        generatetoaddress. The cache is therefore capped at 100 PoW blocks
+        (upstream Bitcoin mines 199)."""
 
         assert self.num_nodes <= MAX_NODES
         create_cache = False
@@ -489,18 +494,15 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             for node in self.nodes:
                 node.wait_for_rpc_connection()
 
-            # Create a 199-block-long chain; each of the 4 first nodes
-            # gets 25 mature blocks and 25 immature.
-            # The 4th node gets only 24 immature blocks so that the very last
-            # block in the cache does not age too much (have an old tip age).
-            # This is needed so that we are out of IBD when the test starts,
-            # see the tip age check in IsInitialBlockDownload().
-            for i in range(8):
-                self.nodes[0].generatetoaddress(25 if i != 7 else 24, self.nodes[i % 4].get_deterministic_priv_key().address)
+            # Create a 100-block-long chain (all minable via PoW on regtest;
+            # see the class docstring note about lastPOWBlock). The first
+            # node's coinbases mature at height 100.
+            for i in range(4):
+                self.nodes[0].generatetoaddress(25, self.nodes[i % 4].get_deterministic_priv_key().address)
             sync_blocks(self.nodes)
 
             for n in self.nodes:
-                assert_equal(n.getblockchaininfo()["blocks"], 199)
+                assert_equal(n.getblockchaininfo()["blocks"], 100)
 
             # Shut them down, and clean up cache directories:
             self.stop_nodes()
@@ -513,7 +515,12 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
                 os.rmdir(cache_path(i, 'wallets'))  # Remove empty wallets dir
                 for entry in os.listdir(cache_path(i)):
                     if entry not in ['chainstate', 'blocks']:
-                        os.remove(cache_path(i, entry))
+                        # Blocknet builds regtest/indexes (forced txindex);
+                        # remove trees as well as plain files.
+                        if os.path.isdir(cache_path(i, entry)):
+                            shutil.rmtree(cache_path(i, entry))
+                        else:
+                            os.remove(cache_path(i, entry))
 
         for i in range(self.num_nodes):
             from_dir = get_datadir_path(self.options.cachedir, i)
