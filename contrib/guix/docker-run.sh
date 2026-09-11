@@ -41,7 +41,10 @@ docker run --rm --privileged \
     # Clean previous Guix build state (profile symlink exists from previous run)
     rm -rf /blocknet/guix-build-*/var 2>/dev/null || true
     rm -rf /blocknet/guix-build-*/distsrc-* 2>/dev/null || true
-    rm -rf /blocknet/blocknet-binaries 2>/dev/null || true
+    # Clean per-host outputs only, so a multi-host run preserves artifacts of
+    # hosts that already completed.
+    for _h in $HOSTS; do rm -rf "/blocknet/blocknet-binaries/$_h" 2>/dev/null || true; done
+    rm -rf /blocknet/blocknet-binaries/dist-archive 2>/dev/null || true
     mkdir -p /blocknet/blocknet-binaries
     . /root/.guix-profile/etc/profile 2>/dev/null || true
     export PATH="/root/.guix-profile/bin:$PATH"
