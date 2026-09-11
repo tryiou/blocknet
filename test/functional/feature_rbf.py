@@ -56,7 +56,7 @@ def make_utxo(node, amount, confirmed=True, scriptPubKey=CScript([1])):
             new_size = len(node.getrawmempool())
             # Error out if we have something stuck in the mempool, as this
             # would likely be a bug.
-            assert(new_size < mempool_size)
+            assert (new_size < mempool_size)
             mempool_size = new_size
 
     return COutPoint(int(txid, 16), 0)
@@ -211,7 +211,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
 
         mempool = self.nodes[0].getrawmempool()
         for doublespent_txid in chain_txids:
-            assert(doublespent_txid not in mempool)
+            assert (doublespent_txid not in mempool)
 
     def test_doublespend_tree(self):
         """Doublespend of a big tree of transactions"""
@@ -236,7 +236,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
             tx.vout = vout
             tx_hex = txToHex(tx)
 
-            assert(len(tx.serialize()) < 100000)
+            assert (len(tx.serialize()) < 100000)
             txid = self.nodes[0].sendrawtransaction(tx_hex, True)
             yield tx
             _total_txs[0] += 1
@@ -529,7 +529,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # Now tx1b should be able to replace tx1a
         tx1b_txid = self.nodes[0].sendrawtransaction(tx1b_hex, True)
 
-        assert(tx1b_txid in self.nodes[0].getrawmempool())
+        assert (tx1b_txid in self.nodes[0].getrawmempool())
 
         # 2. Check that absolute fee checks use modified fee.
         tx1_outpoint = make_utxo(self.nodes[0], int(1.1*COIN))
@@ -556,7 +556,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # tx2b should now be accepted
         tx2b_txid = self.nodes[0].sendrawtransaction(tx2b_hex, True)
 
-        assert(tx2b_txid in self.nodes[0].getrawmempool())
+        assert (tx2b_txid in self.nodes[0].getrawmempool())
 
     def test_rpc(self):
         us0 = self.nodes[0].listunspent()[0]

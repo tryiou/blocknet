@@ -121,6 +121,7 @@ jobs:
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
             apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates ccache bison > /dev/null
+            git config --global --add safe.directory /blocknet
             make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
             ./autogen.sh > /tmp/autogen.log 2>&1
             CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --enable-reduce-exports --with-gui=qt5 > /tmp/configure.log 2>&1 || (cat config.log; exit 1)
@@ -146,6 +147,7 @@ jobs:
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
             apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates bison > /dev/null
+            git config --global --add safe.directory /blocknet
             make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
             ./autogen.sh > /tmp/autogen.log 2>&1
             # NO_GUI: unit tests do not need Qt; keeps the job fast
@@ -191,6 +193,7 @@ jobs:
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
             apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 python3-pip git ca-certificates bison > /dev/null
+            git config --global --add safe.directory /blocknet
             pip3 install --quiet pyzmq 2>/dev/null || true
             make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > /tmp/depends.log 2>&1; echo "depends EXIT:$?"
             ./autogen.sh > /tmp/autogen.log 2>&1
@@ -225,6 +228,7 @@ jobs:
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
             apt-get update -qq && apt-get install -y --no-install-recommends shellcheck yamllint python3 python3-pip git flake8 > /dev/null
+            git config --global --add safe.directory /blocknet
             pip3 install --quiet codespell 2>/dev/null || true
             yamllint .github/workflows/
             shellcheck contrib/*.sh contrib/**/*.sh

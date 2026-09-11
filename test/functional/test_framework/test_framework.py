@@ -174,18 +174,18 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             self.setup_network()
             self.run_test()
             success = TestStatus.PASSED
-        except JSONRPCException as e:
+        except JSONRPCException:
             self.log.exception("JSONRPC error")
         except SkipTest as e:
             self.log.warning("Test Skipped: %s" % e.message)
             success = TestStatus.SKIPPED
-        except AssertionError as e:
+        except AssertionError:
             self.log.exception("Assertion failed")
-        except KeyError as e:
+        except KeyError:
             self.log.exception("Key error")
-        except Exception as e:
+        except Exception:
             self.log.exception("Unexpected exception caught during testing")
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             self.log.warning("Exiting after keyboard interrupt")
 
         if success == TestStatus.FAILED and self.options.pdbonfailure:
@@ -204,10 +204,10 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             self.log.info("Note: bitcoinds were not stopped and may still be running")
 
         should_clean_up = (
-            not self.options.nocleanup and
-            not self.options.noshutdown and
-            success != TestStatus.FAILED and
-            not self.options.perf
+            not self.options.nocleanup
+            and not self.options.noshutdown
+            and success != TestStatus.FAILED
+            and not self.options.perf
         )
         if should_clean_up:
             self.log.info("Cleaning up {} on exit".format(self.options.tmpdir))
@@ -519,7 +519,7 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             from_dir = get_datadir_path(self.options.cachedir, i)
             to_dir = get_datadir_path(self.options.tmpdir, i)
             shutil.copytree(from_dir, to_dir)
-            initialize_datadir(self.options.tmpdir, i)  # Overwrite port/rpcport in bitcoin.conf
+            initialize_datadir(self.options.tmpdir, i)  # Overwrite port/rpcport in blocknet.conf
 
     def _initialize_chain_clean(self):
         """Initialize empty blockchain for use by the test.
