@@ -2954,21 +2954,6 @@ bool App::Impl::hasNodeService(const CPubKey & nodePubKey, const std::string & s
 
 //******************************************************************************
 //******************************************************************************
-template <typename T>
-T random_element(T begin, T end)
-{
-    const unsigned long n = std::distance(begin, end);
-    const unsigned long divisor = (RAND_MAX + 1) / n;
-
-    unsigned long k;
-    do { k = std::rand() / divisor; } while (k >= n);
-
-    std::advance(begin, k);
-    return begin;
-}
-
-//******************************************************************************
-//******************************************************************************
 bool App::selectUtxos(const std::string &addr, const std::vector<wallet::UtxoEntry> &outputs,
                       const std::function<double(uint32_t, uint32_t)> &minTxFee1,
                       const std::function<double(uint32_t, uint32_t)> &minTxFee2,

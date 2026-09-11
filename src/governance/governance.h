@@ -1249,31 +1249,21 @@ public:
             const int start = bestBlockHeight + k*slice;
             const int end = k == cores-1 ? blockHeight+1 // check bounds, +1 due to "<" logic below, ensure inclusion of last block
                                          : start+slice;
-            // try single threaded on failure
+            // Block loading runs single threaded: concurrency here caused
+            // state issues (see git history), so p1 is never sharded across
+            // threads and failures abort the load.
             try {
-                // TODO Blocknet governance: concurrency causing state issues
-//                if (cores > 1) {
-//                    tg.create_thread([start,end,consensus,&p1] {
-//                        RenameThread("blocknet-governance");
-//                        p1(start, end, consensus);
-//                    });
-//                    useThreadGroup = true;
-//                } else
-                    p1(start, end, consensus);
+                p1(start, end, consensus);
             } catch (...) {
                 try {
                     p1(start, end, consensus);
                 } catch (std::exception & e) {
                     failed = true;
-                    failReasonRet += strprintf("Failed to create thread to load governance data: %s\n", e.what());
+                    failReasonRet += strprintf("Failed to load governance data: %s\n", e.what());
                     return false; // fatal error
                 }
             }
         }
-
-        // Wait for all threads to complete
-        if (useThreadGroup)
-            tg.join_all();
 
         if (failed)
             return false;
@@ -1374,7 +1364,7 @@ public:
                 const int start = k*slice;
                 const int end = k == cores-1 ? static_cast<int>(tmpvotes.size())
                                              : start+slice;
-                // try single threaded on failure
+                // Vote validation can run single threaded on failure
                 try {
                     if (cores > 1) {
                         tg.create_thread([start,end,consensus,&p2] {
