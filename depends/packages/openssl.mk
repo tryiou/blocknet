@@ -37,7 +37,7 @@ $(package)_config_opts_linux=-fPIC -Wa,--noexecstack
 $(package)_config_opts_x86_64_linux=linux-x86_64
 $(package)_config_opts_aarch64_linux=linux-aarch64
 $(package)_config_opts_x86_64_darwin=darwin64-x86_64-cc
-$(package)_config_opts_arm64_darwin=darwin64-arm64-cc
+$(package)_config_opts_aarch64_darwin=darwin64-arm64-cc
 $(package)_config_opts_x86_64_mingw32=mingw64
 # aarch64 mingw uses the mingwarm64 target (aarch64 asm, win64 perlasm);
 # mingw64 is x86_64-only and would miscompile.

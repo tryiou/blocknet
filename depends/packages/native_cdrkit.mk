@@ -10,7 +10,7 @@ define $(package)_preprocess_cmds
 endef
 
 define $(package)_config_cmds
-  cmake -DCMAKE_INSTALL_PREFIX=$(build_prefix)
+  rm -f CMakeCache.txt && PROFILE_BIN=`command -v gcc` && PROFILE_INCLUDE=`dirname $$$${PROFILE_BIN}`/../include && PROFILE_LIB=`dirname $$$${PROFILE_BIN}`/../lib && CC=gcc CXX=g++ CFLAGS="$$$$CFLAGS -I$$$${PROFILE_INCLUDE} -L$$$${PROFILE_LIB} -fcommon" LDFLAGS="$$$$LDFLAGS -L$$$${PROFILE_LIB}" cmake -DCMAKE_INSTALL_PREFIX=$(build_prefix)
 endef
 
 define $(package)_build_cmds

@@ -10,7 +10,9 @@ $(package)_build_opts+=CFLAGS="$($(package)_cflags) $($(package)_cppflags) -fPIC
 $(package)_build_opts+=RANLIB="$($(package)_ranlib)"
 $(package)_build_opts+=AR="$($(package)_ar)"
 $(package)_build_opts_darwin+=AR="$($(package)_libtool)"
-$(package)_build_opts_darwin+=ARFLAGS="-o"
+# llvm-libtool-darwin (unlike Apple libtool, which defaults to -static for
+# .a output) requires an explicit operation flag.
+$(package)_build_opts_darwin+=ARFLAGS="-static -o"
 endef
 
 define $(package)_config_cmds

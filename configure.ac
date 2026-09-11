@@ -61,6 +61,16 @@ case $host in
   *mingw*)
      lt_cv_deplibs_check_method="pass_all"
   ;;
+  *darwin*)
+     dnl Because it prints a verbose warning, lld fails the following check
+     dnl for "-Wl,-single_module" from libtool.m4:
+     dnl   # If there is a non-empty error log, and "single_module"
+     dnl   # appears in it, assume the flag caused a linker warning
+     dnl "-single_module" works fine on ld64 and lld, so just bypass the test.
+     dnl Failure to set this to "yes" causes libtool to use a very broken
+     dnl link-line for shared libs.
+     lt_cv_apple_cc_single_mod="yes"
+  ;;
 esac
 dnl Require C++17 compiler (no GNU extensions)
 AX_CXX_COMPILE_STDCXX([17], [noext], [mandatory])
@@ -566,8 +576,11 @@ case $host in
            BUILD_OS=darwin
            ;;
          *)
-           AC_PATH_TOOL([INSTALLNAMETOOL], [install_name_tool], install_name_tool)
-           AC_PATH_TOOL([OTOOL], [otool], otool)
+            AC_PATH_TOOL([INSTALLNAMETOOL], [install_name_tool], install_name_tool)
+            AC_PATH_TOOL([OTOOL], [otool], otool)
+            dnl LLVM's objdump understands Mach-O (--macho --dylibs-used),
+            dnl used by macdeployqtplus (OBJDUMP env should point at it).
+            AC_PATH_TOOL([OBJDUMP], [objdump], objdump)
            AC_PATH_PROGS([GENISOIMAGE], [genisoimage mkisofs],genisoimage)
            AC_PATH_PROGS([RSVG_CONVERT], [rsvg-convert rsvg],rsvg-convert)
            AC_PATH_PROGS([IMAGEMAGICK_CONVERT], [convert],convert)

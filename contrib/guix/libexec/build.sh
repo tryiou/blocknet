@@ -116,6 +116,38 @@ EOF
     *darwin*)
         # The CROSS toolchain for darwin uses the SDK and ignores environment variables.
         # See depends/hosts/darwin.mk for more details.
+        # Apple-ld delivery (verified by probe): Guix clang's sibling bindir
+        # `ld` is GNU and wins over any -B dir, so -B cannot steer the
+        # linker. Worse, lld is a multi-call binary dispatching on argv[0]:
+        # a shim named bare `ld` runs in ELF mode ("unknown argument
+        # '-dynamic'"), while `${HOST}-ld` runs in Mach-O (ld64) mode.
+        # So we provide `${HOST}-ld -> ld64.lld` on PATH: the clang driver
+        # looks up `<triple>-ld` in PATH for cross links. Native-safe: the
+        # dir contains no bare `ld`, and native gcc never queries the
+        # triple-prefixed name. Outside host_prefix (prefix wipes in
+        # depends/funcs.mk would delete it there); excluded from distsrc
+        # like the mingw llvm-shims above.
+        DARWIN_SHIMS="${BASEPREFIX}/llvm-shims/darwin"
+        mkdir -p "${DARWIN_SHIMS}"
+        LD64_LLD="$(command -v ld64.lld)" || { echo "'ld64.lld' not found in PATH... Aborting..."; exit 1; }
+        ln -sfn "${LD64_LLD}" "${DARWIN_SHIMS}/${HOST}-ld"
+        # Drop any stale bare-`ld` shim: that name selects lld's ELF mode.
+        rm -f "${DARWIN_SHIMS}/ld"
+        # Mach-O-capable STRIPPROG: llvm-strip rejects --strip-unneeded
+        # (which libtool passes for shared libs) for MachO, while bare
+        # llvm-strip handles Mach-O fine -- so translate one to the other.
+        LLVM_STRIP="$(command -v llvm-strip)" || { echo "'llvm-strip' not found in PATH... Aborting..."; exit 1; }
+        cat > "${DARWIN_SHIMS}/strip" <<EOF
+#!/bin/sh
+# See build.sh: drop --strip-unneeded (unsupported for MachO), bare
+# llvm-strip does the job on both Mach-O and ELF inputs.
+if [ "\$1" = "--strip-unneeded" ]; then
+    shift
+fi
+exec "${LLVM_STRIP}" "\$@"
+EOF
+        chmod +x "${DARWIN_SHIMS}/strip"
+        export PATH="${DARWIN_SHIMS}:${PATH}"
         ;;
     *linux*)
         CROSS_GLIBC="$(store_path "glibc-cross-${HOST}")"
@@ -151,8 +183,8 @@ case "$HOST" in
         # libraries
         #
         # After the native packages in depends are built, the ld wrapper should
-        # no longer affect our build, as clang would instead reach for
-        # x86_64-apple-darwin-ld from cctools
+        # no longer affect our build, as clang instead reaches for lld
+        # (via the make-lld-wrapper from the Guix manifest).
         ;;
     *) export GUIX_LD_WRAPPER_DISABLE_RPATH=yes ;;
 esac
@@ -188,11 +220,8 @@ export TAR_OPTIONS="--owner=0 --group=0 --numeric-owner --mtime='@${SOURCE_DATE_
 export TZ="UTC"
 case "$HOST" in
     *darwin*)
-        # cctools AR, unlike GNU binutils AR, does not have a deterministic mode
-        # or a configure flag to enable determinism by default, it only
-        # understands if this env-var is set or not. See:
-        #
-        # https://github.com/tpoechtrager/cctools-port/blob/55562e4073dea0fbfd0b20e0bf69ffe6390c7f97/cctools/ar/archive.c#L334
+        # llvm-ar is deterministic by default; keep ZERO_AR_DATE as
+        # belt-and-braces for any archive tool that honors it.
         export ZERO_AR_DATE=yes
         ;;
 esac
@@ -229,8 +258,7 @@ make -C depends --jobs="$JOBS" HOST="$HOST" \
                                    x86_64_linux_AR=x86_64-linux-gnu-gcc-ar \
                                    x86_64_linux_RANLIB=x86_64-linux-gnu-gcc-ranlib \
                                    x86_64_linux_NM=x86_64-linux-gnu-gcc-nm \
-                                   x86_64_linux_STRIP=x86_64-linux-gnu-strip \
-                                   FORCE_USE_SYSTEM_CLANG=1
+                                   x86_64_linux_STRIP=x86_64-linux-gnu-strip
 
 
 ###########################
@@ -298,6 +326,20 @@ esac
 
 # Make $HOST-specific native binaries from depends available in $PATH
 export PATH="${BASEPREFIX}/${HOST}/native/bin:${PATH}"
+# install-strip must use a Mach-O-capable strip: profile `strip` is GNU
+# binutils ("file format not recognized" on .dylib). Exported before core
+# configure so AC_CHECK_TOOL bakes it into the Makefiles (STRIPPROG).
+# Points at the llvm-shims/darwin `strip` wrapper (see above), which
+# translates libtool's --strip-unneeded for llvm-strip.
+# Same story for install_name_tool (llvm-install-name-tool) and objdump
+# (llvm-objdump --macho), consumed by macdeployqtplus via Makefiles.
+case "$HOST" in
+    *darwin*)
+        export STRIP="${BASEPREFIX}/llvm-shims/darwin/strip"
+        export INSTALLNAMETOOL="$(command -v llvm-install-name-tool)"
+        export OBJDUMP="$(command -v llvm-objdump)"
+        ;;
+esac
 mkdir -p "$DISTSRC"
 (
     cd "$DISTSRC"
@@ -395,7 +437,7 @@ mkdir -p "$DISTSRC"
                     | gzip -9n > "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.tar.gz" \
                     || ( rm -f "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.tar.gz" && exit 1 )
             )
-            make deploy ${V:+V=1} OSX_ZIP="${OUTDIR}/${DISTNAME}-${HOST}-unsigned.zip"
+            make deploy ${V:+V=1} OSX_DMG="${OUTDIR}/${DISTNAME}-${HOST}.dmg"
             ;;
     esac
     (

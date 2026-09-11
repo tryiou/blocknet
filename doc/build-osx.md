@@ -20,7 +20,7 @@ Dependencies
 
 See [dependencies.md](dependencies.md) for a complete overview.
 
-If you want to build the disk image with `make deploy` (.dmg / optional), you need RSVG:
+If you want to build the distributable app package with `make deploy` (.zip / optional), you need RSVG:
 
     brew install librsvg
 
@@ -60,7 +60,7 @@ Build Bitcoin Core
 
         make check
 
-4.  You can also create a .dmg that contains the .app bundle (optional):
+4.  You can also package the .app bundle as a .zip (optional):
 
         make deploy
 
@@ -104,7 +104,7 @@ Other commands:
 Notes
 -----
 
-* Tested on macOS 13+ (x86_64 and arm64). Minimum deployment target 11.0 (see `depends/hosts/darwin.mk`).
+* Tested on macOS 14+ (x86_64 and arm64). Minimum deployment target 14.0 (see `depends/hosts/darwin.mk`).
 
 * Building with downloaded Qt binaries is not officially supported. See the notes in [#7714](https://github.com/bitcoin/bitcoin/issues/7714)
 
@@ -112,9 +112,10 @@ Deterministic macOS DMG Notes
 -----------------------------
 
 Working macOS DMGs are created in Linux by combining a recent clang/LLVM,
-the LLD linker (`-fuse-ld=lld`, `-mlinker-version=711`) and DMG authoring tools.
-See `depends/hosts/darwin.mk`:
-`OSX_MIN_VERSION=11.0`, `OSX_SDK_VERSION=14.0`, `XCODE_VERSION=15.0`.
+the LLD Mach-O linker (driven through a `${HOST}-ld` → `ld64.lld` PATH shim
+created by the Guix build scripts, `-mlinker-version=711`) and DMG authoring
+tools. See `depends/hosts/darwin.mk`:
+`OSX_MIN_VERSION=14.0`, `OSX_SDK_VERSION=14.0`, `XCODE_VERSION=26.1.1`.
 
 Apple uses clang extensively for development and has upstreamed the necessary
 functionality so that a vanilla clang can take advantage. It supports the use
@@ -124,16 +125,27 @@ when building for macOS.
 These tools inject timestamps by default, which produce non-deterministic
 binaries. The ZERO_AR_DATE environment variable is used to disable that.
 
-All builds must target an Apple SDK. These SDKs are free to download, but not
-redistributable. Register for a developer account, download Xcode 15, and
-extract the SDK (see `contrib/macdeploy/README.md#sdk-extraction`).
-Place it at:
+All builds must target an Apple SDK. The pinned SDK tarball is hosted by
+bitcoincore.org (hash-verified on fetch — see `contrib/guix/macos-sdk.env`):
 
 ```
-depends/SDKs/Xcode-15.0-15A240d-extracted-SDK-with-libcxx-headers
+source contrib/guix/macos-sdk.env
+mkdir -p depends/SDKs
+curl --location --fail "$MACOS_SDK_URL/$MACOS_SDK_NAME.tar" -o /tmp/macos-sdk.tar
+printf '%s %s\n' "$MACOS_SDK_SHA256" /tmp/macos-sdk.tar | sha256sum --check
+tar -C depends/SDKs -xf /tmp/macos-sdk.tar
 ```
 
+which places it at:
+
+```
+depends/SDKs/Xcode-26.1.1-17B100-extracted-SDK-with-libcxx-headers
+```
+
+Alternatively, with a Mac + developer account, download Xcode 26.1.1, extract
+the SDK (see `contrib/macdeploy/README.md#sdk-extraction`) and place it there
 (the exact name must match `depends/hosts/darwin.mk`, or set `SDK_PATH`).
+
 On macOS, find your local SDK with `xcrun --show-sdk-path` and create the
 tarball with:
 

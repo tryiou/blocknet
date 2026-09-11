@@ -12,6 +12,10 @@ define $(package)_set_vars
 $(package)_config_opts=--disable-shared --enable-cxx --disable-replication
 $(package)_config_opts_mingw32=--enable-mingw
 $(package)_config_opts_linux=--with-pic
+# Modern compilers error on implicit declarations by default, which breaks
+# BDB 4.8's configure probes (e.g. Darwin _spin_lock_try) and build.
+# Same flags as upstream bitcoin.
+$(package)_cflags+=-Wno-error=implicit-function-declaration -Wno-error=format-security -Wno-error=implicit-int
 $(package)_cxxflags=-std=c++17
 $(package)_cppflags_mingw32=-DUNICODE -D_UNICODE
 endef

@@ -156,3 +156,5 @@ depends/download/
 SHA256SUMS
 SHA256SUMS.part
 *~
+
+.opencode/

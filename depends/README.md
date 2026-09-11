@@ -76,11 +76,17 @@ mingw path remains; the old `make-mingw-pthreads-cross-toolchain` /
 
 > Releases via Guix inside Docker `FROM ubuntu:22.04` (Guix stock `glibc 2.35` floor). C++17 required.
 
-#### For macOS cross compilation (SDK 14 / Xcode 15, LLD-based toolchain)
+#### For macOS cross compilation (SDK 14 / Xcode 26.1.1, LLD-based toolchain)
 
     sudo apt-get install curl librsvg2-bin libtiff-tools bsdmainutils cmake imagemagick libcap-dev libz-dev libbz2-dev python3-setuptools
     # plus: automake libtool pkg-config clang lld llvm; SDK in depends/SDKs/ (see release.yml / contrib/guix)
     # SDK layout: depends/SDKs/Xcode-<ver>-<build>-extracted-SDK-with-libcxx-headers (see depends/hosts/darwin.mk)
+    # NOTE: the linker is driven via a `<host-triple>-ld` -> `ld64.lld` shim that must
+    # exist on PATH (clang does NOT accept -fuse-ld=lld here). The Guix scripts create
+    # it automatically; outside Guix, create it in any directory on PATH that is OUTSIDE
+    # depends/<host>/ (that prefix is wiped on every depends rebuild), e.g.:
+    #   mkdir -p ~/bin && ln -s "$(command -v ld64.lld || command -v ld64.lld-18)" \
+    #     ~/bin/x86_64-apple-darwin-ld
 
 #### For Win64/WinARM64 cross compilation
 

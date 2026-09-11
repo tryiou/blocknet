@@ -54,6 +54,20 @@ jobs:
         working-directory: blocknet
         run: DOCKER_BUILDKIT=1 docker build -f contrib/guix/Dockerfile -t blocknet-guix:22.04 .
 
+      - name: Install macOS SDK (when darwin hosts requested)
+        if: ${{ inputs.os_filter == '' || contains(inputs.os_filter, 'm') }}
+        working-directory: blocknet
+        run: |
+          source contrib/guix/macos-sdk.env
+          SDK_ARCHIVE="$RUNNER_TEMP/$MACOS_SDK_NAME.tar"
+          if [ ! -d "depends/SDKs/$MACOS_SDK_NAME" ]; then
+            mkdir -p depends/SDKs
+            curl --location --fail "$MACOS_SDK_URL/$MACOS_SDK_NAME.tar" --output "$SDK_ARCHIVE"
+            printf '%s %s\n' "$MACOS_SDK_SHA256" "$SDK_ARCHIVE" | sha256sum --check
+            tar -C depends/SDKs -xf "$SDK_ARCHIVE"
+          fi
+          ls depends/SDKs/
+
       - name: Guix build (all hosts, inside Docker, single log)
         working-directory: blocknet
         run: |

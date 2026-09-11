@@ -1,0 +1,20 @@
+--- a/dmg/io.c
++++ b/dmg/io.c
+@@ -4,6 +4,7 @@
+ #include <zlib.h>
+ 
+ #include <dmg/dmg.h>
++#include <dmg/adc.h>
+ #include <inttypes.h>
+ 
+ #define SECTORS_AT_A_TIME 0x200
+--- a/dmg/dmgfile.c
++++ b/dmg/dmgfile.c
+@@ -9,6 +9,7 @@
+ 
+ #include <dmg/dmg.h>
+ #include <dmg/dmgfile.h>
++#include <dmg/adc.h>
+ 
+ static void cacheRun(DMG* dmg, BLKXTable* blkx, int run) {
+ 	size_t bufferSize;

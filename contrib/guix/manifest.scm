@@ -13,8 +13,11 @@
               (gnu packages file)
               (gnu packages gawk)
              (gnu packages gcc)
+             (gnu packages gnome)
+             (gnu packages image)
+             (gnu packages imagemagick)
              ((gnu packages installers) #:select (nsis-x86_64))
-             ((gnu packages linux) #:select (linux-libre-headers-6.1 util-linux))
+             ((gnu packages linux) #:select (linux-libre-headers-6.1 util-linux libcap))
              (gnu packages llvm)
              (gnu packages moreutils)
              (gnu packages perl)
@@ -456,6 +459,16 @@ specific moment in time, whitelisting and revocation checks.")
         (base32
          "09sm4srvvkw458pn48ga9q7ykr4xlz7q8gh1h9w7nxpf001qgpwb"))))
     (build-system python-build-system)
+    (arguments
+     '(#:phases
+       (modify-phases %standard-phases
+         (add-after 'unpack 'fix-py311-open-mode
+           (lambda _
+             ;; setup.py uses open(..., "rU"); universal-newlines mode was
+             ;; removed in Python 3.11. Plain "r" already does universal
+             ;; newlines by default.
+             (substitute* "setup.py"
+               (("open\\(nm, \"rU\"\\)") "open(nm, \"r\")")))))))
     (home-page "https://github.com/ronaldoussoren/altgraph")
     (synopsis "Python graph (network) package")
     (description "altgraph is a fork of graphlib: a graph (network) package for
@@ -481,10 +494,16 @@ etc. with graphviz output.")
     (build-system python-build-system)
     (propagated-inputs
      `(("python-altgraph" ,python-altgraph)))
-    (arguments
-     '(#:phases
-       (modify-phases %standard-phases
-         (add-after 'unpack 'disable-broken-tests
+     (arguments
+      '(#:phases
+        (modify-phases %standard-phases
+          (add-after 'unpack 'fix-py311-open-mode
+            (lambda _
+              ;; setup.py uses open(..., "rU"); universal-newlines mode was
+              ;; removed in Python 3.11.
+              (substitute* "setup.py"
+                (("open\\(nm, \"rU\"\\)") "open(nm, \"r\")"))))
+          (add-after 'unpack 'disable-broken-tests
            (lambda _
              ;; This test is broken as there is no keyboard interrupt.
              (substitute* "macholib_tests/test_command_line.py"
@@ -624,10 +643,22 @@ inspecting signatures in Mach-O binaries.")
            (list bison
                  (list gcc-toolchain-12 "static")
                  (make-bitcoin-cross-toolchain target)))
-          ((string-contains target "darwin")
-           (list clang-toolchain-18
-                 lld-18
-                 (make-lld-wrapper lld-18 #:lld-as-ld? #t)
-                 python-signapple
-                 zip))
+           ((string-contains target "darwin")
+            ;; Pure-LLVM Darwin cross: clang-toolchain-18 provides clang,
+            ;; llvm-ar/nm/objcopy/objdump/ranlib/strip AND llvm-libtool-darwin
+            ;; (Apple-compatible archiver used by b2 Boost and miniupnpc).
+            (list clang-toolchain-18
+                  lld-18
+                  (make-lld-wrapper lld-18 #:lld-as-ld? #t)
+                  python-signapple
+                  ;; libcap headers for native_cdrkit (wodim check).
+                  libcap
+                  ;; libmagic for native_cdrkit (genisoimage link).
+                  file
+                  ;; SVG -> PNG (dmg background) + PNG -> multipage TIFF.
+                  librsvg
+                  imagemagick
+                  ;; TIFF multipage assembly (dmg background).
+                  libtiff
+                  zip))
           (else '())))))

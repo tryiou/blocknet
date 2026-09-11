@@ -15,11 +15,21 @@ fi
 
 # Persistent Guix store (survives daemon restarts, no --disable-chroot needed)
 VOLUME_FLAGS="-v $PWD:/blocknet -w /blocknet -v blocknet-guix-store:/gnu/store -v blocknet-guix-var:/var/guix"
+# External macOS SDK dir: in-repo depends/SDKs/ rides the /blocknet bind-mount,
+# but an out-of-tree SDK_PATH must be mounted and forwarded explicitly.
+SDK_MOUNT=()
+if [ -n "${SDK_PATH:-}" ] && [ -d "${SDK_PATH}" ]; then
+  SDK_MOUNT=(-v "${SDK_PATH}:${SDK_PATH}" -e "SDK_PATH=${SDK_PATH}")
+fi
 
 echo "Host HOSTS=$HOSTS JOBS=$JOBS"
 echo "Running Guix single-arch smoke inside Docker (--privileged for guix-daemon, chroot enabled)..."
+# NOTE: IPv6 is disabled in-container — the host's v6 route is black-holed and
+# Guix substitute fetches stall trying AAAA first while IPv4 works fine.
 docker run --rm --privileged \
+  --sysctl net.ipv6.conf.all.disable_ipv6=1 \
   $VOLUME_FLAGS \
+  ${SDK_MOUNT[@]+"${SDK_MOUNT[@]}"} \
   -e HOSTS="$HOSTS" -e JOBS="$JOBS" -e FORCE_DIRTY_WORKTREE=1 \
   -e OUTDIR_BASE="/blocknet/blocknet-binaries" \
   blocknet-guix:22.04 bash -c '
