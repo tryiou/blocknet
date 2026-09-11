@@ -1,4 +1,10 @@
-BIPs that are implemented by Bitcoin Core (up-to-date up to **v0.18.0**):
+This list documents Bitcoin improvement proposals implemented by the
+Bitcoin Core codebase Blocknet forks (base version **v0.18.0**); version
+references are to the inherited Bitcoin Core functionality, not to
+Blocknet release versions. It is kept for reference; Blocknet-specific
+protocol elements (PoS staking per the Quark consensus rules, XBridge
+atomic swaps using BIP 65 CLTV, Service Nodes, governance) are described
+at [docs.blocknet.org](https://docs.blocknet.org).
 
 * [`BIP 9`](https://github.com/bitcoin/bips/blob/master/bip-0009.mediawiki): The changes allowing multiple soft-forks to be deployed in parallel have been implemented since **v0.12.1**  ([PR #7575](https://github.com/bitcoin/bitcoin/pull/7575))
 * [`BIP 11`](https://github.com/bitcoin/bips/blob/master/bip-0011.mediawiki): Multisig outputs are standard since **v0.6.0** ([PR #669](https://github.com/bitcoin/bitcoin/pull/669)).
