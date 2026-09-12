@@ -688,6 +688,8 @@ if TARGET_WINDOWS
 blocknetd_SOURCES += bitcoind-res.rc
 endif
 
+# SERVER appears twice: static link order — wallet references interfaces::*
+# symbols defined in the server lib (circular wallet<->server deps).
 blocknetd_LDADD = \
   $(LIBBITCOIN_SERVER) \
   $(LIBBITCOIN_WALLET) \
