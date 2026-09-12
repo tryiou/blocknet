@@ -7,6 +7,7 @@
 
 #include <amount.h>
 #include <algorithm>
+#include <iterator>
 #include <key_io.h>
 #include <net.h>
 #include <netmessagemaker.h>
@@ -285,8 +286,15 @@ public:
             }
 
             addressId = boost::get<CKeyID>(dest);
+            uint32_t tipHeight{0};
+            uint256 tipHash;
+            {
+                LOCK(cs_main); // chainActive reads
+                tipHeight = chainActive.Height();
+                tipHash = chainActive.Tip()->GetBlockHash();
+            }
             const auto & sighash = sn::ServiceNode::CreateSigHash(snodePubKey, tier, addressId, collateral,
-                                                                  chainActive.Height(), chainActive.Tip()->GetBlockHash());
+                                                                  tipHeight, tipHash);
 
             // Sign the servicenode with the collateral's private key
             CKey sign;
@@ -298,8 +306,15 @@ public:
             }
 
         } else { // OPEN tier
+            uint32_t tipHeight{0};
+            uint256 tipHash;
+            {
+                LOCK(cs_main); // chainActive reads
+                tipHeight = chainActive.Height();
+                tipHash = chainActive.Tip()->GetBlockHash();
+            }
             const auto & sighash = sn::ServiceNode::CreateSigHash(snodePubKey, tier, addressId, collateral,
-                                                                  chainActive.Height(), chainActive.Tip()->GetBlockHash());
+                                                                  tipHeight, tipHash);
 
             if (!key.SignCompact(sighash, sig) || sig.empty()) { // sign with snode pubkey
                 const auto errMsg = strprintf("service node registration failed, bad signature, is the servicenode.conf populated? %s", address);
@@ -308,8 +323,14 @@ public:
             }
         }
 
-        ServiceNode snode(snodePubKey, tier, addressId, collateral, chainActive.Height(),
-                chainActive.Tip()->GetBlockHash(), sig);
+        uint32_t tipHeight{0};
+        uint256 tipHash;
+        {
+            LOCK(cs_main); // chainActive reads
+            tipHeight = chainActive.Height();
+            tipHash = chainActive.Tip()->GetBlockHash();
+        }
+        ServiceNode snode(snodePubKey, tier, addressId, collateral, tipHeight, tipHash, sig);
         auto snodePtr = addSn(snode);
         if (!snodePtr) {
             const std::string errMsg = "service node registration failed";
@@ -925,8 +946,14 @@ protected:
         LOCK(mu);
         if (seenPackets.count(hash))
             return true; // already seen
-        if (seenPackets.size() > 350000)
-            seenPackets.clear(); // mem mgmt, ~12MB (32bytes * 350k)
+        if (seenPackets.size() > 350000) {
+            // mem mgmt, ~12MB (32bytes * 350k). Trim the oldest portion
+            // instead of clear(): bulk-wiping would drop all replay
+            // protection at once and allow a replay burst.
+            auto it = seenPackets.begin();
+            std::advance(it, static_cast<long>(seenPackets.size() / 2));
+            seenPackets.erase(seenPackets.begin(), it);
+        }
         seenPackets.insert(hash);
         return false;
     }
