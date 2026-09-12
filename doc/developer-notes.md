@@ -373,6 +373,16 @@ as each waits for the other to release its lock) are a problem. Compile with
 `-DDEBUG_LOCKORDER` (or use `--enable-debug`) to get lock order inconsistencies
 reported in the debug.log file.
 
+#### Blocknet-specific lock order
+
+`sn::ServiceNodeMgr` (`src/servicenode/servicenodemgr.h`) holds `mu` for all
+servicenode state. The enforced order is `mu` → `cs_main` may **not** be
+nested: `isValid()` reaches `cs_main` via `GetTxFunc` /
+`IsServiceNodeBlockValidFunc` (`src/validation.cpp`), so it must be called
+*outside* `mu`. Callers snapshot state under `mu`, validate outside, then
+re-acquire `mu` to apply (see `processValidationBlock`, `addSn`). `cs_main`
+alone is taken for short chain reads (e.g. `registerSn` tip reads).
+
 Re-architecting the core code so there are better-defined interfaces
 between the various components is a goal, with any necessary locking
 done by the components (e.g. see the self-contained `CBasicKeyStore` class
