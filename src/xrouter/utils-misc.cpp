@@ -7,6 +7,7 @@
 #include <rpc/protocol.h>
 
 #include <string>
+#include <limits>
 #include <regex>
 
 
@@ -178,8 +179,32 @@ bool is_hex(const std::string & hex)
 }
 
 bool hextodec(const std::string & hex, unsigned int & n) {
-    n = std::stoul(hex, nullptr, 16);
-    return true;
+    // Strict hex validation: stoul(base 16) accepts a "0x" prefix and stops
+    // at the first invalid char ("0xZZ" -> 0), so require a non-empty,
+    // fully-consumed hex string.
+    const std::string digits = (hex.size() > 1 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
+        ? hex.substr(2) : hex;
+    if (digits.empty())
+        return false;
+    for (const char c : digits) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!ok)
+            return false;
+    }
+    try {
+        size_t consumed{0};
+        const auto v = std::stoul(hex, &consumed, 16);
+        if (consumed != hex.size())
+            return false; // trailing garbage
+        if (v > std::numeric_limits<unsigned int>::max())
+            return false; // out of range
+        n = static_cast<unsigned int>(v);
+        return true;
+    } catch (const std::invalid_argument &) {
+        return false; // not a hex number
+    } catch (const std::out_of_range &) {
+        return false; // too large
+    }
 }
 
 // We need this to allow zero CAmount in xrouter

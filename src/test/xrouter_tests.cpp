@@ -27,6 +27,22 @@ BOOST_AUTO_TEST_SUITE(xrouter_tests)
 BOOST_AUTO_TEST_CASE(xrouter_tests_default) {
 }
 
+// hextodec must report failure instead of throwing on bad input (used by
+// xrGetBlockHash to validate "0x..." block numbers).
+BOOST_AUTO_TEST_CASE(xrouter_tests_hextodec) {
+    unsigned int n{0};
+    BOOST_CHECK(xrouter::hextodec("0x10", n)   && n == 16);
+    BOOST_CHECK(xrouter::hextodec("0x0", n)    && n == 0);
+    BOOST_CHECK(xrouter::hextodec("0xFF", n)   && n == 255);
+    BOOST_CHECK(xrouter::hextodec("0xffffFFFF", n) && n == 0xffffffff);
+    BOOST_CHECK(xrouter::hextodec("ffffffff", n) && n == 0xffffffff);
+    BOOST_CHECK(!xrouter::hextodec("0xZZ", n));
+    BOOST_CHECK(!xrouter::hextodec("0x", n));
+    BOOST_CHECK(!xrouter::hextodec("not hex", n));
+    BOOST_CHECK(!xrouter::hextodec("0x100000000", n)); // > uint32 range
+    BOOST_CHECK(!xrouter::hextodec("0xFFFFFFFFFFFFFFFFF", n));
+}
+
 // Shell-safety validators used by the docker plugin path (xrouterserver).
 BOOST_AUTO_TEST_CASE(xrouter_tests_shell_safety) {
     using namespace xrouter;
