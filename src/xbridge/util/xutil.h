@@ -18,10 +18,6 @@
 
 #include <string>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
-
 #include <boost/date_time/posix_time/ptime.hpp>
 
 #define BEGIN(a) ((char*)&(a))
@@ -140,9 +136,9 @@ namespace xbridge
      * @param statusCode - error code
      * @param function - nome of called function
      * @param message - additional error description
-     * @return  json_spirit object with error description
+     * @return  UniValue object with error description
      */
-     json_spirit::Object makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message = "");
+     UniValue makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message = "");
 
     void LogOrderMsg(const std::string & orderId, const std::string & msg, const std::string & func);
     void LogOrderMsg(UniValue o, const std::string & msg, const std::string & func);

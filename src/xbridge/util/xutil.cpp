@@ -38,8 +38,6 @@
 //*****************************************************************************
 namespace xbridge
 {
-
-using namespace json_spirit;
 std::locale loc;
 
 //******************************************************************************
@@ -434,12 +432,12 @@ bool xBridgePartialOrderDriftCheck(CAmount makerSource, CAmount makerDest, CAmou
     return success;
 }
 
-json_spirit::Object makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message)
+UniValue makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message)
 {
-    Object error;
-    error.emplace_back(Pair("error",xbridge::xbridgeErrorText(statusCode,message)));
-    error.emplace_back(Pair("code", statusCode));
-    error.emplace_back(Pair("name",function));
+    UniValue error(UniValue::VOBJ);
+    error.pushKV("error",xbridge::xbridgeErrorText(statusCode,message));
+    error.pushKV("code", static_cast<int>(statusCode));
+    error.pushKV("name",function);
     return  error;
 }
 
