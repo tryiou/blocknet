@@ -248,19 +248,6 @@ BITCOIN_CORE_H = \
   zmq/zmqpublishnotifier.h \
   zmq/zmqrpc.h
 
-# Blocknet requires the json spirit library
-JSON_H = \
-  json/json_spirit.h \
-  json/json_spirit_error_position.h \
-  json/json_spirit_reader.h \
-  json/json_spirit_reader_template.h \
-  json/json_spirit_stream_reader.h \
-  json/json_spirit_utils.h \
-  json/json_spirit_value.h \
-  json/json_spirit_writer.h \
-  json/json_spirit_writer_template.h \
-  json/json_spirit_writer_options.h
-
 # Blocknet XBridge
 BITCOIN_CORE_H += \
   xbridge/bitcoinrpcconnector.h \
@@ -384,9 +371,6 @@ libbitcoin_server_a_SOURCES = \
   validationinterface.cpp \
   versionbits.cpp \
   $(BITCOIN_CORE_H)
-
-# Blocknet requires json spirit library
-libbitcoin_server_a_SOURCES += $(JSON_H)
 
 # Blocknet governance wallet methods
 if ENABLE_WALLET
@@ -636,7 +620,6 @@ xbridge_libxbridge_a_SOURCES = \
   xbridge/xbridgewalletconnectordevault.cpp \
   xbridge/xbridgewalletconnectorstealth.cpp \
   xbridge/xbridgewalletconnectorpart.cpp \
-  $(JSON_H) \
   $(BITCOIN_CORE_H)
 
 # xrouter: interoperability protocol
@@ -660,7 +643,6 @@ xrouter_libxrouter_a_SOURCES = \
   xrouter/xroutersettings.cpp \
   xrouter/xroutersnodeconfig.cpp \
   servicenode/servicenodemgr.cpp \
-  $(JSON_H) \
   $(BITCOIN_CORE_H)
 
 if GLIBC_BACK_COMPAT

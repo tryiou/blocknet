@@ -130,4 +130,34 @@ BOOST_AUTO_TEST_CASE(xbridge_pricecheck) {
     }
 }
 
+/**
+ * Pin the on-chain order-info JSON serialization (embedded in OP_RETURN by
+ * xbridge::App when preparing the service node fee tx). UniValue output must
+ * stay parseable and semantically identical to the pre-migration json_spirit
+ * output: a 5-element array [id, fromCurrency, fromAmount, toCurrency,
+ * toAmount] with integer amounts serialized as JSON numbers.
+ */
+BOOST_AUTO_TEST_CASE(xbridge_orderinfo_json_serialization) {
+    UniValue info(UniValue::VARR);
+    info.push_back("91d0ea83edc79b9a2041c51d08037cff87c181efb311a095dfdd4edbcc7993a9");
+    info.push_back("BLOCK");
+    info.push_back(static_cast<int64_t>(11220000));
+    info.push_back("LTC");
+    info.push_back(static_cast<int64_t>(5000000));
+    const std::string str = info.write();
+    BOOST_CHECK_EQUAL(str,
+        "[\"91d0ea83edc79b9a2041c51d08037cff87c181efb311a095dfdd4edbcc7993a9\",\"BLOCK\",11220000,\"LTC\",5000000]");
+
+    // round-trip through the parser used by TxOutToCurrencyPair
+    UniValue back;
+    BOOST_CHECK(back.read(str));
+    BOOST_CHECK(back.isArray());
+    BOOST_CHECK_EQUAL(back.size(), 5);
+    BOOST_CHECK_EQUAL(back[0].get_str(), "91d0ea83edc79b9a2041c51d08037cff87c181efb311a095dfdd4edbcc7993a9");
+    BOOST_CHECK_EQUAL(back[1].get_str(), "BLOCK");
+    BOOST_CHECK_EQUAL(back[2].get_int64(), int64_t{11220000});
+    BOOST_CHECK_EQUAL(back[3].get_str(), "LTC");
+    BOOST_CHECK_EQUAL(back[4].get_int64(), int64_t{5000000});
+}
+
 BOOST_AUTO_TEST_SUITE_END()
