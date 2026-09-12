@@ -6,6 +6,7 @@
 //******************************************************************************
 
 #include <xbridge/util/logger.h>
+#include <xbridge/util/secpctx.h>
 #include <xbridge/xbridgecryptoproviderbtc.h>
 
 #include <random.h>
@@ -175,28 +176,19 @@ namespace xbridge
 //*****************************************************************************
 BtcCryptoProvider::BtcCryptoProvider()
 {
-    context = secp256k1_context_create(SECP256K1_CONTEXT_SIGN | SECP256K1_CONTEXT_VERIFY);
-
-    // Pass in a random blinding seed to the secp256k1 context.
-    std::vector<unsigned char, secure_allocator<unsigned char>> seed(32);
-    GetRandBytes(seed.data(), 32);
-    bool ret = secp256k1_context_randomize(context, seed.data());
-    if (!ret)
-        ERR() << "can't randomize secp256k1 context " << __FUNCTION__;
 }
 
 //*****************************************************************************
 //*****************************************************************************
 BtcCryptoProvider::~BtcCryptoProvider()
 {
-    secp256k1_context_destroy(context);
 }
 
 //*****************************************************************************
 //*****************************************************************************
 bool BtcCryptoProvider::check(const std::vector<unsigned char> & key)
 {
-    return secp256k1_ec_seckey_verify(context, &key[0]);
+    return secp256k1_ec_seckey_verify(Secp256k1Ctx(), &key[0]);
 }
 
 //*****************************************************************************
@@ -215,14 +207,14 @@ void BtcCryptoProvider::makeNewKey(std::vector<unsigned char> & key)
 bool BtcCryptoProvider::getPubKey(const std::vector<unsigned char> & key, std::vector<unsigned char> & pub)
 {
     secp256k1_pubkey pubkey;
-    if (!secp256k1_ec_pubkey_create(context, &pubkey, &key[0]))
+    if (!secp256k1_ec_pubkey_create(Secp256k1Ctx(), &pubkey, &key[0]))
     {
         return false;
     }
 
     pub.resize(65);
     size_t clen = 65;
-    secp256k1_ec_pubkey_serialize(context, &pub[0],
+    secp256k1_ec_pubkey_serialize(Secp256k1Ctx(), &pub[0],
                                   &clen, &pubkey,
                                   SECP256K1_EC_COMPRESSED);
     pub.resize(clen);
@@ -239,14 +231,14 @@ bool BtcCryptoProvider::sign(const std::vector<unsigned char> & key,
     signature.resize(72);
 
     secp256k1_ecdsa_signature sig;
-    int ret = secp256k1_ecdsa_sign(context, &sig, data.begin(), &key[0],
+    int ret = secp256k1_ecdsa_sign(Secp256k1Ctx(), &sig, data.begin(), &key[0],
                                    secp256k1_nonce_function_rfc6979, NULL);
     if (!ret)
     {
         return false;
     }
 
-    secp256k1_ecdsa_signature_serialize_der(context, &signature[0], &signatureLength, &sig);
+    secp256k1_ecdsa_signature_serialize_der(Secp256k1Ctx(), &signature[0], &signatureLength, &sig);
     signature.resize(signatureLength);
     return true;
 }
@@ -259,7 +251,7 @@ bool BtcCryptoProvider::verify(const std::vector<unsigned char> & pubkey,
 {
     secp256k1_pubkey _pubkey;
     secp256k1_ecdsa_signature sig;
-    if (!secp256k1_ec_pubkey_parse(context, &_pubkey, &pubkey[0], pubkey.size()))
+    if (!secp256k1_ec_pubkey_parse(Secp256k1Ctx(), &_pubkey, &pubkey[0], pubkey.size()))
     {
         return false;
     }
@@ -267,14 +259,14 @@ bool BtcCryptoProvider::verify(const std::vector<unsigned char> & pubkey,
     {
         return false;
     }
-    if (!ecdsa_signature_parse_der_lax(context, &sig, &signature[0], signature.size()))
+    if (!ecdsa_signature_parse_der_lax(Secp256k1Ctx(), &sig, &signature[0], signature.size()))
     {
         return false;
     }
     // libsecp256k1's ECDSA verification requires lower-S signatures, which have
     // not historically been enforced in Bitcoin, so normalize them first.
-    secp256k1_ecdsa_signature_normalize(context, &sig, &sig);
-    return secp256k1_ecdsa_verify(context, &sig, data.begin(), &_pubkey);
+    secp256k1_ecdsa_signature_normalize(Secp256k1Ctx(), &sig, &sig);
+    return secp256k1_ecdsa_verify(Secp256k1Ctx(), &sig, data.begin(), &_pubkey);
 }
 
 } // namespace xbridge

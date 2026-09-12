@@ -38,8 +38,6 @@ public:
                 const uint256 & data,
                 const std::vector<unsigned char> & signature);
 
-private:
-    secp256k1_context * context;
 };
 
 } // namespace xbridge

@@ -262,6 +262,7 @@ BITCOIN_CORE_H += \
   xbridge/util/txlog.h \
   xbridge/util/xassert.h \
   xbridge/util/xbridgeerror.h \
+  xbridge/util/secpctx.h \
   xbridge/util/xseries.h \
   xbridge/util/xutil.h \
   xbridge/version.h \
@@ -594,6 +595,7 @@ xbridge_libxbridge_a_SOURCES = \
   xbridge/rpcxbridge.cpp \
   xbridge/util/logger.cpp \
   xbridge/util/posixtimeconversion.cpp \
+  xbridge/util/secpctx.cpp \
   xbridge/util/settings.cpp \
   xbridge/util/txlog.cpp \
   xbridge/util/xbridgeerror.cpp \

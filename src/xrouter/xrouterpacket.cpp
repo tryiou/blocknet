@@ -4,6 +4,8 @@
 
 #include <xrouter/xrouterpacket.h>
 
+#include <xbridge/util/secpctx.h>
+
 #include <xrouter/xrouterlogger.h>
 
 #include <crypto/sha256.h>
@@ -15,44 +17,7 @@
 namespace xrouter
 {
 
-namespace
-{
-secp256k1_context * secpContext = nullptr;
 
-class SecpInstance
-{
-public:
-    SecpInstance()
-    {
-        assert(secpContext == nullptr);
-
-        secp256k1_context * ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN | SECP256K1_CONTEXT_VERIFY);
-        assert(ctx != nullptr);
-
-        {
-            // Pass in a random blinding seed to the secp256k1 context.
-            std::vector<unsigned char, secure_allocator<unsigned char>> vseed(32);
-            GetRandBytes(vseed.data(), 32);
-            bool ret = secp256k1_context_randomize(ctx, vseed.data());
-            assert(ret);
-        }
-
-        secpContext = ctx;
-    }
-    ~SecpInstance()
-    {
-        secp256k1_context * ctx = secpContext;
-        secpContext = nullptr;
-
-        if (ctx)
-        {
-            secp256k1_context_destroy(ctx);
-        }
-    }
-};
-static SecpInstance secpInstance;
-
-} // namespace
 
 //******************************************************************************
 //******************************************************************************
@@ -77,12 +42,12 @@ bool XRouterPacket::sign(const std::vector<unsigned char> & pubkey,
     }
 
     secp256k1_ecdsa_signature sig;
-    if (secp256k1_ecdsa_sign(secpContext, &sig, hash, &privkey[0], 0, 0) == 0)
+    if (secp256k1_ecdsa_sign(Secp256k1Ctx(), &sig, hash, &privkey[0], 0, 0) == 0)
     {
         return false;
     }
 
-    secp256k1_ecdsa_signature_serialize_compact(secpContext, signatureField(), &sig);
+    secp256k1_ecdsa_signature_serialize_compact(Secp256k1Ctx(), signatureField(), &sig);
 
     return verify();
 }
@@ -108,20 +73,20 @@ bool XRouterPacket::verify()
     memcpy(signatureField(), signature, rawSignatureSize);
 
     secp256k1_ecdsa_signature sig;
-    if (secp256k1_ecdsa_signature_parse_compact(secpContext, &sig, signatureField()) == 0)
+    if (secp256k1_ecdsa_signature_parse_compact(Secp256k1Ctx(), &sig, signatureField()) == 0)
     {
         ERR() << "incorrect or unparseable signature " << __FUNCTION__;
         return false;
     }
 
     secp256k1_pubkey scpubkey;
-    if (secp256k1_ec_pubkey_parse(secpContext, &scpubkey, pubkeyField(), pubkeySize) == 0)
+    if (secp256k1_ec_pubkey_parse(Secp256k1Ctx(), &scpubkey, pubkeyField(), pubkeySize) == 0)
     {
         ERR() << "the public key could not be parsed or is invalid " << __FUNCTION__;
         return false;
     }
 
-    if (secp256k1_ecdsa_verify(secpContext, &sig, hash, &scpubkey) != 1)
+    if (secp256k1_ecdsa_verify(Secp256k1Ctx(), &sig, hash, &scpubkey) != 1)
     {
         ERR() << "bad signature " << __FUNCTION__;
         return false;
@@ -130,7 +95,7 @@ bool XRouterPacket::verify()
     // correct signature, check pubkey
     unsigned char pub[pubkeySize];
     size_t len = pubkeySize;
-    secp256k1_ec_pubkey_serialize(secpContext, pub, &len, &scpubkey, SECP256K1_EC_COMPRESSED);
+    secp256k1_ec_pubkey_serialize(Secp256k1Ctx(), pub, &len, &scpubkey, SECP256K1_EC_COMPRESSED);
 
     if (len != pubkeySize)
     {
