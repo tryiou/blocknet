@@ -1226,23 +1226,34 @@ protected:
             }
         }
 
-        // Check that existing snodes are valid
+        // Check that existing snodes are valid. isValid() may acquire cs_main
+        // (via GetTxFunc/IsServiceNodeBlockValidFunc), so it must NOT be called
+        // while holding mu: snapshot the work under mu, validate outside mu,
+        // then apply the results under mu.
+        std::vector<std::pair<ServiceNodePtr, bool>> toRevalidate; // snode, wasMarkedInvalid
         {
             LOCK(mu);
             for (auto & item : snodes) {
                 auto snode = item.second;
+                bool spentCollateral = false;
                 for (const auto & collateral : snode->getCollateral()) {
                     if (spent.count(collateral)) {
                         snode->markInvalid(true, blockNumber);
+                        spentCollateral = true;
                         break;
                     }
                 }
                 // Re-validate snodes on potential reorg (on block disconnected)
-                if (!connected) {
-                    snode->markInvalid(false); // reset state before is valid check
-                    snode->markInvalid(!snode->isValid(GetTxFunc, IsServiceNodeBlockValidFunc));
-                }
+                if (!connected)
+                    toRevalidate.emplace_back(snode, spentCollateral);
             }
+        }
+        for (const auto & entry : toRevalidate) {
+            const auto & snode = entry.first;
+            const bool valid = snode->isValid(GetTxFunc, IsServiceNodeBlockValidFunc);
+            LOCK(mu);
+            snode->markInvalid(false); // reset state before is valid check
+            snode->markInvalid(!valid);
         }
     }
 
