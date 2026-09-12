@@ -406,9 +406,10 @@ public:
      */
     const ServiceNodePing & getPing(const CPubKey & snodePubKey) {
         LOCK(mu);
-        if (!pings.count(snodePubKey))
-            return std::move(ServiceNodePing{});
-        return pings[snodePubKey];
+        auto it = pings.find(snodePubKey);
+        if (it == pings.end())
+            return nullPing;
+        return it->second;
     }
 
     /**
@@ -1252,6 +1253,11 @@ protected:
     std::set<uint256> seenPackets;
     std::set<ServiceNodeConfigEntry> snodeEntries;
     std::vector<int> seenBlocks;
+
+private:
+    // Returned by getPing() when no ping exists (avoids returning a
+    // reference to a temporary).
+    static const ServiceNodePing nullPing;
 };
 
 }

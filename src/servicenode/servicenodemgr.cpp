@@ -14,4 +14,7 @@ CTxDestination ServiceNodePaymentAddress(const std::string & snode) {
     return CNoDestination{};
 }
 
+// Static empty ping used as getPing()'s fallback return value.
+const ServiceNodePing ServiceNodeMgr::nullPing{};
+
 }

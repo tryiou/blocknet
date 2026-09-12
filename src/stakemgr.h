@@ -83,7 +83,6 @@ public:
     bool StakeBlock(const StakeCoin & stakeCoin, const CChainParams & chainparams);
     int64_t LastUpdateTime() const;
     int LastBlockHeight() const;
-    const StakeCoin & GetStake();
     bool SuitableCoin(const COutput & coin, const int & tipHeight, const Consensus::Params & params) const;
     std::vector<COutput> StakeOutputs(CWallet *wallet, const CAmount & minStakeAmount) const;
     bool GetStakesMeetingTarget(const std::shared_ptr<COutput> & coin, std::shared_ptr<CWallet> & wallet,

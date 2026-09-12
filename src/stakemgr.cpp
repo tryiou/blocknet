@@ -221,12 +221,6 @@ int StakeMgr::LastBlockHeight() const {
     return lastBlockHeight;
 }
 
-const StakeMgr::StakeCoin & StakeMgr::GetStake() {
-    if (!stakeTimes.empty())
-        return *stakeTimes.begin()->second.begin();
-    return std::move(StakeCoin{});
-}
-
 bool StakeMgr::SuitableCoin(const COutput & coin, const int & tipHeight, const Consensus::Params & params) const {
     if (coin.tx->IsCoinBase()) // can't stake coinbase
         return false;
