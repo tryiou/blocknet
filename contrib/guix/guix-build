@@ -457,8 +457,7 @@ EOF
         # Single attempt for deterministic builds — no retry on static failures (wastes time).
         # Transient fport_read failures are rare with persistent /gnu/store and no --disable-chroot.
         rc=0
-        for guix_try in 1; do
-            if time-machine environment --manifest="${PWD}/contrib/guix/manifest.scm" \
+        if ! time-machine environment --manifest="${PWD}/contrib/guix/manifest.scm" \
                                      --container \
                                      --pure \
                                      --no-cwd \
@@ -489,26 +488,12 @@ EOF
                                              OUTDIR="$(OUTDIR_BASE=/outdir-base && outdir_for_host "$HOST")" \
                                              DIST_ARCHIVE_BASE=/outdir-base/dist-archive \
                                            bash -c "cd /blocknet && bash contrib/guix/libexec/build.sh"; then
-                break
-            else
-                rc=$?
-            fi
-            if [ "$guix_try" -eq 1 ]; then
-                echo "ERROR: Guix time-machine failed for $host (rc=$rc)" >&2
-                exit $rc
-            fi
-            echo "WARN: Guix time-machine attempt $guix_try failed for $host (rc=$rc) — restarting guix-daemon and retrying in 5s..." >&2
-            pkill guix-daemon 2>/dev/null || true
-            sleep 2
-            # Re-start daemon — detect correct build group (guixbuild vs _guixbuild)
-            if getent group guixbuild >/dev/null 2>&1; then BG=guixbuild; elif getent group _guixbuild >/dev/null 2>&1; then BG=_guixbuild; else BG=guixbuild; fi
-            guix-daemon --build-users-group="$BG" &
-            sleep 3
-            if ! guix gc --list-failures >/dev/null 2>&1; then
-                echo "WARN: guix-daemon not ready after restart, waiting 5s..." >&2
-                sleep 5
-            fi
-        done
+            echo "Guix time-machine succeeded for $host"
+        else
+            rc=$?
+            echo "ERROR: Guix time-machine failed for $host (rc=$rc)" >&2
+            exit $rc
+        fi
     )
 
 done
