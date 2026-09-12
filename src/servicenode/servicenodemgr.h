@@ -882,12 +882,16 @@ protected:
      * @return
      */
     ServiceNodePtr addSn(const ServiceNode & snode, const bool checkValid = true, const bool staleCheck = true) {
+        // isValid() reaches cs_main (GetTxFunc/IsServiceNodeBlockValidFunc) and must
+        // run outside mu (non-recursive cs_main, see processValidationBlock).
         if (checkValid && !snode.isValid(GetTxFunc, IsServiceNodeBlockValidFunc, staleCheck))
             return nullptr;
-        removeSnWithCollateral(snode);
         auto ptr = std::make_shared<ServiceNode>(snode);
         {
+            // Single critical section: dropping mu between the collateral-dedup and the
+            // insert would let a concurrent addSn race the same collateral in.
             LOCK(mu);
+            removeSnWithCollateralLocked(ptr);
             snodes[ptr->getSnodePubKey()] = ptr;
         }
         return ptr;
@@ -920,11 +924,8 @@ protected:
      * @return
      */
     bool removeSn(const CPubKey & snodePubKey) {
-        if (!hasSn(snodePubKey))
-            return false;
         LOCK(mu);
-        snodes.erase(snodePubKey);
-        return true;
+        return snodes.erase(snodePubKey) > 0;
     }
 
     /**
@@ -978,15 +979,20 @@ protected:
      */
     void removeSnWithCollateral(const ServiceNode & snode) {
         LOCK(mu);
+        removeSnWithCollateralLocked(std::make_shared<ServiceNode>(snode));
+    }
+
+    // Caller must hold mu.
+    void removeSnWithCollateralLocked(const ServiceNodePtr & snode) {
         std::map<COutPoint, ServiceNodePtr> utxos;
         for (const auto & item : snodes) {
             const auto & s = item.second;
-            if (s->getSnodePubKey() != snode.getSnodePubKey()) { // exclude specified snode
+            if (s->getSnodePubKey() != snode->getSnodePubKey()) { // exclude specified snode
                 for (const auto & utxo : s->getCollateral())
                     utxos[utxo] = s;
             }
         }
-        for (const auto & utxo : snode.getCollateral()) {
+        for (const auto & utxo : snode->getCollateral()) {
             if (utxos.count(utxo) && snodes.count(utxos[utxo]->getSnodePubKey()))
                 snodes.erase(utxos[utxo]->getSnodePubKey());
         }
