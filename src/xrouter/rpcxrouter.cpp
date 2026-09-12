@@ -15,6 +15,7 @@
 #include <uint256.h>
 #include <util/strencodings.h>
 #include <rpc/util.h>
+#include <random.h>
 
 #include <exception>
 #include <netmessagemaker.h>
@@ -1763,7 +1764,7 @@ static UniValue xrUpdateNetworkServices(const JSONRPCRequest& request) {
     }
 
     auto randnode = [](std::set<std::string> & vnodes) -> std::string {
-        auto idx = rand() & (vnodes.size()-1);
+        auto idx = GetRand(vnodes.size()); // unbiased, node RNG
         auto it = vnodes.begin();
         std::advance(it, idx);
         const auto addr = *it;

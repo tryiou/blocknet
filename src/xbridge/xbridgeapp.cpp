@@ -8,6 +8,7 @@
 #include <xbridge/xbridgeapp.h>
 #include <iterator>
 
+#include <random.h>
 #include <xbridge/util/logger.h>
 #include <xbridge/util/settings.h>
 #include <xbridge/util/txlog.h>
@@ -2939,8 +2940,8 @@ std::vector<CPubKey> App::Impl::findShuffledNodesWithService(
                 list.push_back(x.getSnodePubKey());
         }
     }
-    static std::default_random_engine rng{0};
-    std::shuffle(list.begin(), list.end(), rng);
+    static FastRandomContext rng{/*fDeterministic=*/false};
+    Shuffle(list.begin(), list.end(), rng);
     return list;
 }
 
