@@ -67,6 +67,14 @@ std::string fqServiceToUrl(std::string fqservice) {
     boost::replace_all(fqservice, "::", "/");
     return std::move("/" + fqservice);
 }
+bool isShellSafe(const std::string & s) {
+    static const std::string safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:+=@%,";
+    return !s.empty() && s.find_first_not_of(safe) == std::string::npos;
+}
+bool isShellQuotedSafe(const std::string & s) {
+    // Characters that can escape or terminate a double-quoted shell string
+    return s.find_first_of("\"`$\\") == std::string::npos;
+}
 bool removeNamespace(const std::string & service, std::string & result) {
     auto namespaces = std::vector<std::string>{xr, xrs};
 

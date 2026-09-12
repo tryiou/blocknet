@@ -44,6 +44,17 @@ std::string walletCommandKey(const std::string & wallet, const std::string & com
  */
 std::string walletCommandKey(const std::string & wallet);
 /**
+ * Returns true if the string contains only characters that are safe to
+ * interpolate into a shell command without quoting
+ * (alphanumerics and "_", "-", ".", "/", ":", "+", "=", ",", "@", "%").
+ */
+bool isShellSafe(const std::string & s);
+/**
+ * Returns true if the string contains no characters that can break out of
+ * double quotes in a shell command ("`, $, \) — used for quoted arguments.
+ */
+bool isShellQuotedSafe(const std::string & s);
+/**
  * Helper to transform a fully qualified service (e.g. xrs::CustomPlugin) to a url (e.g. xrs/CustomPlugin).
  * @param fqservice
  * @return

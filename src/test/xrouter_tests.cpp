@@ -27,6 +27,32 @@ BOOST_AUTO_TEST_SUITE(xrouter_tests)
 BOOST_AUTO_TEST_CASE(xrouter_tests_default) {
 }
 
+// Shell-safety validators used by the docker plugin path (xrouterserver).
+BOOST_AUTO_TEST_CASE(xrouter_tests_shell_safety) {
+    using namespace xrouter;
+
+    // Safe charsets
+    BOOST_CHECK(isShellSafe("abcXYZ019_-./:+=@%,"));
+    BOOST_CHECK(isShellSafe("MyPlugin"));
+    BOOST_CHECK(isShellQuotedSafe("some search term"));
+    BOOST_CHECK(isShellQuotedSafe("100.00"));
+    // Unquoted: any metacharacter must fail
+    BOOST_CHECK(!isShellSafe("a;b"));
+    BOOST_CHECK(!isShellSafe("a|b"));
+    BOOST_CHECK(!isShellSafe("$(id)"));
+    BOOST_CHECK(!isShellSafe("`id`"));
+    BOOST_CHECK(!isShellSafe("a&b"));
+    BOOST_CHECK(!isShellSafe("a b"));
+    BOOST_CHECK(!isShellSafe("a\"b"));
+    BOOST_CHECK(!isShellSafe(""));
+    // Quoted: only the quote-breakout characters must fail
+    BOOST_CHECK(!isShellQuotedSafe("a\"b"));
+    BOOST_CHECK(!isShellQuotedSafe("a`b"));
+    BOOST_CHECK(!isShellQuotedSafe("a$b"));
+    BOOST_CHECK(!isShellQuotedSafe("a\\b"));
+    BOOST_CHECK(isShellQuotedSafe("a;b|c&d"));
+}
+
 #ifdef USE_XROUTERCLIENT
 
 BOOST_FIXTURE_TEST_CASE(xrouter_tests_waitforservice, XRouterTestClientTestnet) {

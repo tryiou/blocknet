@@ -711,6 +711,13 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
             ERR() << "Failed to run plugin " + name + " \"command\" cannot be empty";
             throw XRouterError("Internal Server Error in command " + name, INTERNAL_SERVER_ERROR);
         }
+        // Docker container and executable are interpolated into a shell
+        // command; require a safe charset (defense in depth even though
+        // these come from the node's own plugin config).
+        if (!isShellSafe(container) || !isShellSafe(exe)) {
+            ERR() << "Failed to run plugin " + name + " \"containername\"/\"command\" contain forbidden characters";
+            throw XRouterError("Internal Server Error in command " + name, INTERNAL_SERVER_ERROR);
+        }
         if (psettings->commandArgs().empty() && expectedParams.size() > 0) {
             ERR() << "Failed to run plugin " + name + " \"args\" cannot be empty when parameters= is set";
             throw XRouterError("Internal Server Error in command " + name, INTERNAL_SERVER_ERROR);
@@ -725,10 +732,19 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
             const auto & arg = "$" + std::to_string(i + 1);
             std::string argv;
 
-            if (psettings->quoteArgs())
+            if (psettings->quoteArgs()) {
+                if (!isShellQuotedSafe(rec)) {
+                    ERR() << "Plugin " + name + " parameter " + std::to_string(i + 1) + " contains forbidden characters";
+                    throw XRouterError("Parameter " + std::to_string(i + 1) + " contains forbidden characters", INVALID_PARAMETERS);
+                }
                 argv = std::string("\""+rec+"\"");
-            else
+            } else {
+                if (!isShellSafe(rec)) {
+                    ERR() << "Plugin " + name + " parameter " + std::to_string(i + 1) + " contains forbidden characters";
+                    throw XRouterError("Parameter " + std::to_string(i + 1) + " contains forbidden characters", INVALID_PARAMETERS);
+                }
                 argv = rec;
+            }
 
             size_t pos;
             replace(cmdargs, pos, spos, arg, argv);
