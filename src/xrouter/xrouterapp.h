@@ -27,9 +27,7 @@
 #include <chrono>
 #include <memory>
 
-#include <json/json_spirit.h>
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
+#include <univalue.h>
 
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
@@ -296,7 +294,7 @@ public:
      * @param data Array with json output.
      * @return
      */
-    void snodeConfigJSON(const std::map<NodeAddr, std::pair<XRouterSettingsPtr, sn::ServiceNode::Tier>> & configs, json_spirit::Array & data);
+    void snodeConfigJSON(const std::map<NodeAddr, std::pair<XRouterSettingsPtr, sn::ServiceNode::Tier>> & configs, UniValue & data);
 
     /**
      * Returns a map of connected node configurations.

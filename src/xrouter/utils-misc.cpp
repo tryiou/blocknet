@@ -9,13 +9,10 @@
 #include <string>
 #include <regex>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_utils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 
-using namespace json_spirit;
 
 #ifdef _WIN32
 #include <objbase.h>
@@ -197,85 +194,6 @@ CAmount to_amount(double val)
     return nAmount;
 }
 
-Object form_reply(const std::string & uuid, const Value & reply) {
-    Object ret;
-
-    if (reply.type() == array_type) {
-        ret.emplace_back("reply", reply);
-        if (!uuid.empty())
-            ret.emplace_back("uuid", uuid);
-        return ret;
-    }
-
-    if (reply.type() != obj_type) {
-        ret.emplace_back("reply", reply);
-        if (!uuid.empty())
-            ret.emplace_back("uuid", uuid);
-        return ret;
-    }
-
-    ret = reply.get_obj();
-
-    Value rply = find_value(ret, "reply");
-    Value result = find_value(ret, "result");
-    const Value error_val = find_value(ret, "error");
-    const Value code_val = find_value(ret, "code");
-    const Value uuid_val = find_value(ret, "uuid");
-
-    if (rply.type() == null_type && result.type() == null_type && error_val.type() == null_type) {
-        ret = Object();
-        ret.emplace_back("reply", reply.get_obj());
-        if (error_val.type() != null_type)
-            ret.emplace_back("error", "Bad request");
-        if (code_val.type() != null_type)
-            ret.emplace_back("code", code_val);
-        if (uuid_val.type() != null_type)
-            ret.emplace_back("uuid", uuid_val);
-        rply = find_value(ret, "reply");
-        result = Value();
-    }
-
-    // Display result/reply
-    if (result.type() != null_type && rply.type() == null_type) {
-        for (int i = 0; i < ret.size(); ++i) {
-            const auto & item = ret[i];
-            if (item.name_ == std::string{"result"}) {
-                ret.erase(ret.begin()+i);
-                break;
-            }
-        }
-        ret.insert(ret.begin(), Pair("reply", result));
-    }
-
-    // Display errors
-    if (error_val.type() != null_type) {
-        if (code_val.type() == null_type) {
-            // insert after error
-            for (int i = 0; i < ret.size(); ++i) {
-                const auto & item = ret[i];
-                if (item.name_ == std::string{"error"}) {
-                    ret.insert(ret.begin()+i, Pair("code", xrouter::INTERNAL_SERVER_ERROR));
-                    break;
-                }
-            }
-        }
-    }
-
-    // Display uuid if necessary
-    if (!uuid.empty()) {
-        for (int i = 0; i < ret.size(); ++i) {
-            const auto & item = ret[i];
-            if (item.name_ == std::string{"uuid"}) {
-                ret.erase(ret.begin()+i);
-                break;
-            }
-        }
-        ret.emplace_back("uuid", uuid);
-    }
-
-    return ret;
-}
-
 UniValue form_reply(const std::string & uuid, const UniValue & reply) {
     UniValue ret;
 
@@ -345,17 +263,6 @@ UniValue form_reply(const std::string & uuid, const UniValue & reply) {
     return rret;
 }
 
-Object form_reply(const std::string & uuid, const std::string & reply)
-{
-    Value reply_val;
-    try {
-        read_string(reply, reply_val);
-    } catch (...) {
-        reply_val = Value(reply);
-    }
-    if (reply_val.type() == null_type)
-        reply_val = Value(reply);
-    return form_reply(uuid, reply_val);
-}
+
 
 } // namespace xrouter

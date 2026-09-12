@@ -763,13 +763,13 @@ std::vector<CNode*> App::availableNodesRetained(enum XRouterCommand command, con
 
 std::string App::parseConfig(XRouterSettingsPtr cfg)
 {
-    Object result;
-    result.emplace_back("config", cfg->publicText());
-    Object plugins;
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("config", cfg->publicText());
+    UniValue plugins(UniValue::VOBJ);
     for (const std::string & s : cfg->getPlugins())
-        plugins.emplace_back(s, cfg->getPluginSettings(s)->publicText());
-    result.emplace_back("plugins", plugins);
-    return json_spirit::write_string(Value(result), true);
+        plugins.pushKV(s, cfg->getPluginSettings(s)->publicText());
+    result.pushKV("plugins", plugins);
+    return result.write();
 }
 
 //*****************************************************************************
@@ -853,11 +853,12 @@ bool App::processConfigReply(CNode *node, XRouterPacketPtr packet, CValidationSt
     offset += reply.size() + 1;
 
     try {
-        Value reply_val;
-        read_string(reply, reply_val);
-        Object reply_obj = reply_val.get_obj();
+        UniValue reply_val;
+        if (!reply_val.read(reply))
+            throw std::runtime_error("failed to parse reply json");
+        const UniValue &reply_obj = reply_val.get_obj();
         std::string config = find_value(reply_obj, "config").get_str();
-        Object plugins = find_value(reply_obj, "plugins").get_obj();
+        const UniValue &plugins = find_value(reply_obj, "plugins").get_obj();
 
         auto settings = std::make_shared<XRouterSettings>(CPubKey(spubkey.begin(), spubkey.end()), false); // not our config
         auto configInit = settings->init(config);
@@ -870,15 +871,21 @@ bool App::processConfigReply(CNode *node, XRouterPacketPtr packet, CValidationSt
             return false;
         }
 
-        for (const auto & plugin : plugins) {
+        const auto &pluginKeys = plugins.getKeys();
+        const auto &pluginVals = plugins.getValues();
+        for (size_t pi = 0; pi < pluginKeys.size(); ++pi) {
+            const std::string &pluginName = pluginKeys[pi];
             try {
+                if (pi >= pluginVals.size())
+                    throw std::runtime_error("missing plugin value");
+                const auto &pluginVal = pluginVals[pi];
                 auto psettings = std::make_shared<XRouterPluginSettings>(false); // not our config
-                psettings->read(plugin.value_.get_str());
+                psettings->read(pluginVal.get_str());
                 // Exclude open tier paid services
                 if (!(snode.getTier() == sn::ServiceNode::OPEN && psettings->fee() > std::numeric_limits<double>::epsilon()))
-                    settings->addPlugin(plugin.name_, psettings);
+                    settings->addPlugin(pluginName, psettings);
             } catch (...) {
-                ERR() << "Failed to read plugin " << plugin.name_ << " on query " << uuid << " from node " << nodeAddr;
+                ERR() << "Failed to read plugin " << pluginName << " on query " << uuid << " from node " << nodeAddr;
                 checkSnodeBan(nodeAddr, queryMgr.updateScore(nodeAddr, -2));
             }
         }
@@ -977,11 +984,11 @@ void App::onMessageReceived(CNode* node, const std::vector<unsigned char> & mess
             if (!packet->copyFrom(message)) {
                 if (server->isStarted()) { // Send error back to client
                     try {
-                        Object error;
-                        error.emplace_back("error", "XRouter Node reported a protocol error on a received packet. "
-                                                    "Unable to deserialize packet, possible bad packet header");
-                        error.emplace_back("code", xrouter::BAD_REQUEST);
-                        const std::string reply = json_spirit::write_string(Value(error), true);
+                        UniValue error(UniValue::VOBJ);
+                        error.pushKV("error", "XRouter Node reported a protocol error on a received packet. "
+                                              "Unable to deserialize packet, possible bad packet header");
+                        error.pushKV("code", static_cast<int>(xrouter::BAD_REQUEST));
+                        const std::string reply = error.write();
                         XRouterPacket packet(xrInvalid, "protocol_error");
                         packet.append(reply);
                         packet.sign(server->pubKey(), server->privKey());
@@ -1673,7 +1680,7 @@ std::map<NodeAddr, std::pair<XRouterSettingsPtr, sn::ServiceNode::Tier>> App::xr
     return selectedConfigs;
 }
 
-void App::snodeConfigJSON(const std::map<NodeAddr, std::pair<XRouterSettingsPtr, sn::ServiceNode::Tier>> & configs, json_spirit::Array & data) {
+void App::snodeConfigJSON(const std::map<NodeAddr, std::pair<XRouterSettingsPtr, sn::ServiceNode::Tier>> & configs, UniValue & data) {
     if (configs.empty()) // no configs
         return;
 
@@ -1683,81 +1690,84 @@ void App::snodeConfigJSON(const std::map<NodeAddr, std::pair<XRouterSettingsPtr,
         if (settings == nullptr)
             continue;
 
-        Object o;
+        UniValue o(UniValue::VOBJ);
 
         // pubkey
         std::vector<unsigned char> spubkey;
         servicenodePubKey(settings->getNode(), spubkey);
-        o.emplace_back("nodepubkey", HexStr(spubkey));
+        o.pushKV("nodepubkey", HexStr(spubkey));
 
         // score
-        o.emplace_back("score", queryMgr.getScore(item.first));
+        o.pushKV("score", static_cast<int64_t>(queryMgr.getScore(item.first)));
         // banned
-        o.emplace_back("banned", g_banman->IsBanned(settings->getAddr()));
+        o.pushKV("banned", g_banman->IsBanned(settings->getAddr()));
         // payment address
-        o.emplace_back("paymentaddress", settings->paymentAddress(xrDefault));
+        o.pushKV("paymentaddress", settings->paymentAddress(xrDefault));
         // tier
-        o.emplace_back("tier", sn::ServiceNodeMgr::tierString(tier));
+        o.pushKV("tier", sn::ServiceNodeMgr::tierString(tier));
 
         // wallets
         const auto & wallets = settings->getWallets();
-        o.emplace_back("spvwallets", Array(wallets.begin(), wallets.end()));
+        UniValue spvwallets(UniValue::VARR);
+        for (const auto & w : wallets)
+            spvwallets.push_back(w);
+        o.pushKV("spvwallets", spvwallets);
 
         // wallet configs
-        Array wc;
+        UniValue wc(UniValue::VARR);
         for (const auto & w : wallets) {
-            Object wlg;
-            wlg.emplace_back("spvwallet", w);
-            Array cmds;
+            UniValue wlg(UniValue::VOBJ);
+            wlg.pushKV("spvwallet", w);
+            UniValue cmds(UniValue::VARR);
             const auto xrcommands = XRouterCommands();
             for (const auto & cmd : xrcommands) {
                 if (tier == sn::ServiceNode::OPEN)
                     continue; // exclude open tier xr:: wallets
-                Object co;
-                co.emplace_back("command", XRouterCommand_ToString(cmd));
-                co.emplace_back("fee", settings->commandFee(cmd, w));
-                co.emplace_back("paymentaddress", settings->paymentAddress(cmd, w));
-                co.emplace_back("requestlimit", settings->clientRequestLimit(cmd, w));
-                co.emplace_back("fetchlimit", settings->commandFetchLimit(cmd, w));
-                co.emplace_back("timeout", settings->commandTimeout(cmd, w));
-                co.emplace_back("disabled", !settings->isAvailableCommand(cmd, w));
+                UniValue co(UniValue::VOBJ);
+                co.pushKV("command", XRouterCommand_ToString(cmd));
+                co.pushKV("fee", settings->commandFee(cmd, w));
+                co.pushKV("paymentaddress", settings->paymentAddress(cmd, w));
+                co.pushKV("requestlimit", static_cast<int64_t>(settings->clientRequestLimit(cmd, w)));
+                co.pushKV("fetchlimit", static_cast<int64_t>(settings->commandFetchLimit(cmd, w)));
+                co.pushKV("timeout", static_cast<int64_t>(settings->commandTimeout(cmd, w)));
+                co.pushKV("disabled", !settings->isAvailableCommand(cmd, w));
                 cmds.push_back(co);
             }
-            wlg.emplace_back("commands", cmds);
+            wlg.pushKV("commands", cmds);
             wc.push_back(wlg);
         }
-        o.emplace_back("spvconfigs", wc);
+        o.pushKV("spvconfigs", wc);
 
         // fees
-        o.emplace_back("feedefault", settings->defaultFee());
-        Object ofs;
+        o.pushKV("feedefault", settings->defaultFee());
+        UniValue ofs(UniValue::VOBJ);
         const auto & schedule = settings->feeSchedule();
         for (const auto & s : schedule)
-            ofs.emplace_back(s.first,  s.second);
-        o.emplace_back("fees", ofs);
+            ofs.pushKV(s.first, s.second);
+        o.pushKV("fees", ofs);
 
         // plugins
-        Object plugins;
+        UniValue plugins(UniValue::VOBJ);
         for (const auto & plugin : settings->getPlugins()) {
             auto pls = settings->getPluginSettings(plugin);
             if (pls) {
                 if (tier == sn::ServiceNode::OPEN && pls->fee() > std::numeric_limits<double>::epsilon())
                     continue; // exclude open tier paid services
-                Object plg;
-                plg.emplace_back("parameters", boost::algorithm::join(pls->parameters(), ","));
-                plg.emplace_back("fee", settings->commandFee(xrService, plugin));
-                plg.emplace_back("paymentaddress", settings->paymentAddress(xrService, plugin));
-                plg.emplace_back("requestlimit", settings->clientRequestLimit(xrService, plugin));
-                plg.emplace_back("fetchlimit", settings->commandFetchLimit(xrService, plugin));
-                plg.emplace_back("timeout", settings->commandTimeout(xrService, plugin));
-                plg.emplace_back("disabled", !settings->isAvailableCommand(xrService, plugin));
-                plg.emplace_back("help", settings->help(xrService, plugin));
-                plugins.emplace_back(plugin, plg);
+                UniValue plg(UniValue::VOBJ);
+                plg.pushKV("parameters", boost::algorithm::join(pls->parameters(), ","));
+                plg.pushKV("fee", settings->commandFee(xrService, plugin));
+                plg.pushKV("paymentaddress", settings->paymentAddress(xrService, plugin));
+                plg.pushKV("requestlimit", static_cast<int64_t>(settings->clientRequestLimit(xrService, plugin)));
+                plg.pushKV("fetchlimit", static_cast<int64_t>(settings->commandFetchLimit(xrService, plugin)));
+                plg.pushKV("timeout", static_cast<int64_t>(settings->commandTimeout(xrService, plugin)));
+                plg.pushKV("disabled", !settings->isAvailableCommand(xrService, plugin));
+                plg.pushKV("help", settings->help(xrService, plugin));
+                plugins.pushKV(plugin, plg);
             }
         }
-        o.emplace_back("services", plugins);
+        o.pushKV("services", plugins);
 
-        data.emplace_back(o);
+        data.push_back(o);
     }
 }
 
@@ -1824,7 +1834,7 @@ bool App::reloadConfigs() {
 }
 
 std::string App::getStatus() {
-    Object result;
+    UniValue result(UniValue::VOBJ);
 
     if (sn::ServiceNodeMgr::instance().hasActiveSn()) {
         const auto & entry = sn::ServiceNodeMgr::instance().getActiveSn();
@@ -1832,7 +1842,7 @@ std::string App::getStatus() {
         std::map<NodeAddr, std::pair<XRouterSettingsPtr, sn::ServiceNode::Tier>> my;
         my[snode.getHostPort()] = std::make_pair(xrsettings, snode.getTier());
 
-        Array data;
+        UniValue data(UniValue::VARR);
         snodeConfigJSON(my, data);
 
         if (data.empty() || data.size() > 1)
@@ -1841,19 +1851,19 @@ std::string App::getStatus() {
         result = data[0].get_obj();
     }
 
-    result.emplace_back("xrouter", isEnabled());
-    result.emplace_back("servicenode", sn::ServiceNodeMgr::instance().hasActiveSn());
-    result.emplace_back("config", xrsettings->rawText());
+    result.pushKV("xrouter", isEnabled());
+    result.pushKV("servicenode", sn::ServiceNodeMgr::instance().hasActiveSn());
+    result.pushKV("config", xrsettings->rawText());
 
-    Object plugins;
+    UniValue plugins(UniValue::VOBJ);
     for (const auto & p : xrsettings->getPlugins()) {
         auto pp = xrsettings->getPluginSettings(p);
         if (pp)
-            plugins.emplace_back(p, pp->rawText());
+            plugins.pushKV(p, pp->rawText());
     }
-    result.emplace_back("plugins", plugins);
+    result.pushKV("plugins", plugins);
 
-    return json_spirit::write_string(Value(result), json_spirit::pretty_print, 8);
+    return result.write(/*prettyIndent=*/4, /*indentLevel=*/1);
 }
 
 void App::getLatestNodeContainers(std::vector<sn::ServiceNode> & snodes, std::vector<CNode*> & nodes,

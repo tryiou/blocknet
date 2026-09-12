@@ -9,66 +9,61 @@
 #include <bloom.h>
 #include <util/strencodings.h>
 
-#include <json/json_spirit.h>
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-
-using namespace json_spirit;
 
 namespace xrouter
 {
 
-static Value getResult(const std::string & obj)
+static UniValue getResult(const std::string & obj)
 {
-    Value obj_val; read_string(obj, obj_val);
-    if (obj_val.type() == null_type)
-        return Value(obj);
-    const Value & r = find_value(obj_val.get_obj(), "result");
-    if (r.type() == null_type)
-        return Value(obj);
+    UniValue obj_val;
+    if (!obj_val.read(obj) || obj_val.isNull())
+        return UniValue(obj);
+    const UniValue & r = find_value(obj_val.get_obj(), "result");
+    if (r.isNull())
+        return UniValue(obj);
     return r;
 }
 
 static bool hasError(const std::string & data)
 {
-    Value val; read_string(data, val);
-    if (val.type() != obj_type)
+    UniValue val;
+    if (!val.read(data) || !val.isObject())
         return false;
 
     const auto & o = val.get_obj();
-    const Value & error = find_value(o, "error");
-    return error.type() != null_type;
+    const UniValue & error = find_value(o, "error");
+    return !error.isNull();
 }
 
 static std::string checkError(const std::string & data, int code)
 {
-    Value val; read_string(data, val);
-    if (val.type() != obj_type)
+    UniValue val;
+    if (!val.read(data) || !val.isObject())
         return data;
 
-    const Value & error = find_value(val.get_obj(), "error");
-    if (error.type() == null_type)
+    const UniValue & error = find_value(val.get_obj(), "error");
+    if (error.isNull())
         return data;
 
-    auto o = val.get_obj();
-    const Value & code_val = find_value(o, "code");
-    if (code_val.type() == null_type)
-        o.emplace_back("code", code);
-    return write_string(Value(o), false);
+    UniValue o = val.get_obj();
+    const UniValue & code_val = find_value(o, "code");
+    if (code_val.isNull())
+        o.pushKV("code", code);
+    return o.write();
 }
 
-static double parseVout(Value vout, std::string account)
+static double parseVout(UniValue vout, std::string account)
 {
     double result = 0.0;
     double val = find_value(vout.get_obj(), "value").get_real();
-    Object src = find_value(vout.get_obj(), "scriptPubKey").get_obj();
-    const Value & addr_val = find_value(src, "addresses");
-    if (addr_val.is_null())
+    UniValue src = find_value(vout.get_obj(), "scriptPubKey").get_obj();
+    const UniValue & addr_val = find_value(src, "addresses");
+    if (addr_val.isNull())
         return 0.0;
-    Array addr = addr_val.get_array();
+    UniValue addr = addr_val.get_array();
 
     for (unsigned int k = 0; k != addr.size(); k++ ) {
-        std::string cur_addr = Value(addr[k]).get_str();
+        std::string cur_addr = addr[k].get_str();
         if (cur_addr == account)
             result += val;
     }
@@ -79,19 +74,22 @@ static double parseVout(Value vout, std::string account)
 std::string BtcWalletConnectorXRouter::getBlockCount() const
 {
     std::string command("getblockcount");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, {}, jsonver, contenttype);
+    UniValue params(UniValue::VARR);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::string BtcWalletConnectorXRouter::getBlockHash(const int & block) const
 {
     std::string command("getblockhash");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, { block }, jsonver, contenttype);
+UniValue params(UniValue::VARR); params.push_back(block);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::string BtcWalletConnectorXRouter::getBlock(const std::string & blockHash) const
 {
     static const std::string command("getblock");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, { blockHash }, jsonver, contenttype);
+UniValue params(UniValue::VARR); params.push_back(blockHash);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::vector<std::string> BtcWalletConnectorXRouter::getBlocks(const std::vector<std::string> & blockHashes) const
@@ -114,18 +112,20 @@ std::vector<std::string> BtcWalletConnectorXRouter::getBlocks(const std::vector<
 std::string BtcWalletConnectorXRouter::getTransaction(const std::string & hash) const
 {
     static const std::string commandGRT("getrawtransaction");
-    const auto & rawTr = CallRPC(m_user, m_passwd, m_ip, m_port, commandGRT, { hash }, jsonver, contenttype);
+    UniValue params(UniValue::VARR); params.push_back(hash);
+    const auto & rawTr = CallRPC(m_user, m_passwd, m_ip, m_port, commandGRT, params, jsonver, contenttype);
 
     if (hasError(rawTr)) {
         return rawTr;
     } else {
         const auto & rawTr_val = getResult(rawTr);
         std::string hex;
-        if (rawTr_val.type() != str_type)
+        if (!rawTr_val.isStr())
             return "";
         hex = rawTr_val.get_str();
         static const std::string commandDRT("decoderawtransaction");
-        return CallRPC(m_user, m_passwd, m_ip, m_port, commandDRT, { hex }, jsonver, contenttype);
+        UniValue drtparams(UniValue::VARR); drtparams.push_back(hex);
+        return CallRPC(m_user, m_passwd, m_ip, m_port, commandDRT, drtparams, jsonver, contenttype);
     }
 }
 
@@ -150,7 +150,8 @@ std::vector<std::string> BtcWalletConnectorXRouter::getTransactions(const std::v
 std::string BtcWalletConnectorXRouter::decodeRawTransaction(const std::string & hex) const
 {
     static const std::string commandDRT("decoderawtransaction");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, commandDRT, { hex }, jsonver, contenttype);
+    UniValue params(UniValue::VARR); params.push_back(hex);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, commandDRT, params, jsonver, contenttype);
 }
 
 std::vector<std::string> BtcWalletConnectorXRouter::getTransactionsBloomFilter(const int & number, CDataStream & stream, const int & fetchlimit) const
@@ -168,7 +169,7 @@ std::vector<std::string> BtcWalletConnectorXRouter::getTransactionsBloomFilter(c
 
     std::vector<std::string> results;
 
-    const auto & blockCountObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGBC, Array(), jsonver, contenttype);
+    const auto & blockCountObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGBC, UniValue(UniValue::VARR), jsonver, contenttype);
     int blockcount = getResult(blockCountObj).get_int();
 
     if ((fetchlimit > 0) && (blockcount - number > fetchlimit)) {
@@ -177,16 +178,19 @@ std::vector<std::string> BtcWalletConnectorXRouter::getTransactionsBloomFilter(c
     
     for (int id = number; id <= blockcount; id++)
     {
-        const auto & blockHashObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGBH, { id }, jsonver, contenttype);
+        UniValue bhparams(UniValue::VARR); bhparams.push_back(id);
+        const auto & blockHashObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGBH, bhparams, jsonver, contenttype);
         const auto & hash = getResult(blockHashObj).get_str();
-        const auto & blockObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGB, { hash }, jsonver, contenttype);
-        Object block = getResult(blockObj).get_obj();
+        UniValue gbparams(UniValue::VARR); gbparams.push_back(hash);
+        const auto & blockObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGB, gbparams, jsonver, contenttype);
+        UniValue block = getResult(blockObj).get_obj();
 
-        Array txs = find_value(block, "tx").get_array();
+        UniValue txs = find_value(block, "tx").get_array();
 
-        for (const auto & j : txs) {
-            const auto & txid = Value(j).get_str();
-            const auto & rawTrObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGRT, { txid }, jsonver, contenttype);
+        for (const auto & j : txs.getValues()) {
+            const auto & txid = j.get_str();
+            UniValue grtparams(UniValue::VARR); grtparams.push_back(txid);
+            const auto & rawTrObj = CallRPC(m_user, m_passwd, m_ip, m_port, commandGRT, grtparams, jsonver, contenttype);
             const auto & txData_str = getResult(rawTrObj).get_str();
 
             std::vector<unsigned char> txData(ParseHex(txData_str));
@@ -207,7 +211,8 @@ std::vector<std::string> BtcWalletConnectorXRouter::getTransactionsBloomFilter(c
 std::string BtcWalletConnectorXRouter::sendTransaction(const std::string & transaction) const
 {
     static const std::string command("sendrawtransaction");
-    return checkError(CallRPC(m_user, m_passwd, m_ip, m_port, command, { transaction }, jsonver, contenttype), BAD_REQUEST);
+    UniValue params(UniValue::VARR); params.push_back(transaction);
+    return checkError(CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype), BAD_REQUEST);
 }
 
 std::string BtcWalletConnectorXRouter::convertTimeToBlockCount(const std::string & timestamp) const
