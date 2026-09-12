@@ -2206,14 +2206,18 @@ Error App::acceptXBridgeTransaction(const uint256 & id, const std::string & from
     // transaction info
     size_t maxBytes = nMaxDatacarrierBytes-3;
 
-    json_spirit::Array info;
+    UniValue info(UniValue::VARR);
     info.push_back("");
     info.push_back(ptr->fromCurrency);
-    info.push_back(ptr->fromAmount);
+    info.push_back(static_cast<int64_t>(ptr->fromAmount));
     info.push_back(ptr->toCurrency);
-    info.push_back(ptr->toAmount);
-    std::string strInfo = write_string(json_spirit::Value(info));
-    info.erase(info.begin());
+    info.push_back(static_cast<int64_t>(ptr->toAmount));
+    std::string strInfo = info.write();
+    // drop the placeholder front element (order id slot)
+    UniValue tmp(UniValue::VARR);
+    for (size_t i = 1; i < info.size(); ++i)
+        tmp.push_back(info[i]);
+    info = std::move(tmp);
 
     // Truncate the order id in situations where we don't have enough space in the tx
     std::string orderId{ptr->id.GetHex()};
@@ -2221,8 +2225,13 @@ Error App::acceptXBridgeTransaction(const uint256 & id, const std::string & from
         auto leftOver = maxBytes - strInfo.size();
         orderId.erase(leftOver, std::string::npos);
     }
-    info.insert(info.begin(), orderId); // add order id to the front
-    strInfo = write_string(json_spirit::Value(info));
+    // add order id to the front
+    UniValue info2(UniValue::VARR);
+    info2.push_back(orderId);
+    for (size_t i = 0; i < info.size(); ++i)
+        info2.push_back(info[i]);
+    info = std::move(info2);
+    strInfo = info.write();
     if (strInfo.size() > maxBytes) { // make sure we're not too large
         revertOrder(ptr);
         return xbridge::Error::INVALID_ONCHAIN_HISTORY;
@@ -2678,7 +2687,7 @@ std::vector<std::string> App::myServices(const bool includeXRouter) const {
  * @return
  */
 std::string App::myServicesJSON() const {
-    json_spirit::Array xwallets;
+    UniValue xwallets(UniValue::VARR);
     const auto & services = myServices(false); // do not include xrouter here (xrouter included below)
     for (const auto & service : services)
         xwallets.push_back(service);
@@ -2686,18 +2695,18 @@ std::string App::myServicesJSON() const {
     for (const auto & service : utxwallets) // add unit test supplied services
         xwallets.push_back(service);
 
-    json_spirit::Object result;
-    json_spirit::Value xrouterConfigVal;
+    UniValue result(UniValue::VOBJ);
+    UniValue xrouterConfigVal;
     if (xrouter::App::isEnabled() && xrouter::App::instance().isReady()) {
         auto & xrapp = xrouter::App::instance();
         const std::string & xrouterConfig = xrapp.parseConfig(xrapp.xrSettings());
-        json_spirit::read_string(xrouterConfig, xrouterConfigVal);
+        xrouterConfigVal.read(xrouterConfig);
     }
-    result.emplace_back("xrouterversion", static_cast<int>(XROUTER_PROTOCOL_VERSION));
-    result.emplace_back("xbridgeversion", static_cast<int>(version()));
-    result.emplace_back("xrouter", xrouterConfigVal);
-    result.emplace_back("xbridge", xwallets);
-    return json_spirit::write_string(json_spirit::Value(result), json_spirit::none, 8);
+    result.pushKV("xrouterversion", static_cast<int>(XROUTER_PROTOCOL_VERSION));
+    result.pushKV("xbridgeversion", static_cast<int>(version()));
+    result.pushKV("xrouter", xrouterConfigVal);
+    result.pushKV("xbridge", xwallets);
+    return result.write();
 }
 
 //******************************************************************************

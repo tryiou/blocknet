@@ -32,16 +32,11 @@
 #include <servicenode/servicenodemgr.h>
 #include <sync.h>
 
-#include <json/json_spirit.h>
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/date_time/posix_time/conversion.hpp>
 
-using namespace json_spirit;
 
 //*****************************************************************************
 //*****************************************************************************

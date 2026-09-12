@@ -20,8 +20,6 @@
 #include <wallet/wallet.h>
 #endif // ENABLE_WALLET
 
-#include <json/json_spirit_utils.h>
-
 #define HTTP_DEBUG
 
 //*****************************************************************************
@@ -34,7 +32,6 @@ namespace xbridge
 namespace rpc
 {
 
-using namespace json_spirit;
 using namespace std;
 using namespace boost;
 using namespace boost::asio;
@@ -239,10 +236,16 @@ bool createFeeTransaction(const CScript & dstScript, const double amount, const 
 
         rawTx = EncodeHexTx(::CTransaction(mtx));
     }
-    catch (json_spirit::Object & obj)
+    catch (const UniValue & objError)
     {
-        errCode = find_value(obj, "code").get_int();
-        errMessage = find_value(obj, "message").get_str();
+        // JSONRPCError() throws UniValue; kept for parity with the rpc layer.
+        try {
+            errCode = find_value(objError, "code").get_int();
+            errMessage = find_value(objError, "message").get_str();
+        } catch (...) {
+            errCode = -1;
+            errMessage = objError.write();
+        }
     }
     catch (std::runtime_error & e)
     {

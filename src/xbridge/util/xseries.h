@@ -20,8 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_value.h>
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/posix_time/ptime.hpp>
