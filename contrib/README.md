@@ -39,13 +39,13 @@ Scripts and notes for macOS deployment and detached signatures (used by
 Scripts for Windows detached signatures (used by the Guix mingw builds).
 
 ### [Init](/contrib/init) ###
-Service scripts (systemd, OpenRC, upstart) for running a node. Note: the
-units still use legacy `bitcoind` naming and need adaptation before use.
+Service scripts (systemd, OpenRC, Upstart, launchd) for running a node
+(`blocknetd`, dedicated `blocknet` user, `/etc/blocknet` + `/var/lib/blocknetd`).
 
 ### Bash completions ###
-`bitcoind.bash-completion`, `bitcoin-cli.bash-completion`,
-`bitcoin-tx.bash-completion` — completion scripts (legacy bitcoin naming;
-adapt to `blocknetd`/`blocknet-cli`/`blocknet-tx` before use).
+`blocknetd.bash-completion`, `blocknet-cli.bash-completion`,
+`blocknet-tx.bash-completion` — completion scripts for the Blocknet
+binaries.
 
 ### Packaging ###
 The [Debian](/contrib/debian) subfolder contains the copyright file.
