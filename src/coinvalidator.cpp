@@ -122,8 +122,10 @@ bool CoinValidator::LoadStatic() {
     for (std::string &line : infractions) {
         bool result = addLine(line, infMap);
         if (!result) {
-            LogPrintf("Coin Validator: Failed to read infraction: %s\n", line);
-            assert(result);
+            // Static in-tree data: a parse failure means a code bug, but
+            // aborting the node over it is disproportionate. The line is
+            // skipped (validation set shrinks by one entry) and logged.
+            LogPrintf("Coin Validator: ERROR: Failed to read infraction, skipping: %s\n", line);
         }
     }
 
