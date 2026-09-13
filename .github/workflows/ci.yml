@@ -61,7 +61,13 @@ jobs:
           # Artifact required when the SDK was provisioned; without an SDK
           # guix-build soft-skips darwin (upstream behavior), so tolerate that.
           if [ -d "depends/SDKs" ] && [ -n "$(ls -A depends/SDKs 2>/dev/null)" ]; then
-            test -f blocknet-binaries/${{ matrix.host }}/*.tar.gz || test -f blocknet-binaries/${{ matrix.host }}/*.zip || { echo "SDK present but no artifact for ${{ matrix.host }} — FAIL"; exit 1; }
+            # compgen -G (glob-match) instead of `test -f <glob>`: when several
+            # files match (e.g. tarball + -debug/-unsigned variants), test -f
+            # gets >1 argument and usage-errors (exit 2), flagging real
+            # artifacts as missing.
+            compgen -G "blocknet-binaries/${{ matrix.host }}/*.tar.gz" > /dev/null \
+              || compgen -G "blocknet-binaries/${{ matrix.host }}/*.zip" > /dev/null \
+              || { echo "SDK present but no artifact for ${{ matrix.host }} — FAIL"; exit 1; }
           else
             echo "no artifact check for ${{ matrix.host }} (SDK not provisioned)"
           fi
