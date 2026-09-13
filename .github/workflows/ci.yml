@@ -27,10 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: [x86_64-linux-gnu, aarch64-linux-gnu, x86_64-w64-mingw32, arm64-apple-darwin, x86_64-apple-darwin]
-        # aarch64-w64-mingw32 is required via the dedicated guix-matrix-win-arm64 job below
+        host: [x86_64-linux-gnu, aarch64-linux-gnu, x86_64-w64-mingw32, aarch64-w64-mingw32, arm64-apple-darwin, x86_64-apple-darwin]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install macOS SDK (darwin only)
         if: contains(matrix.host, 'darwin')
         run: |
@@ -66,7 +65,7 @@ jobs:
           else
             echo "no artifact check for ${{ matrix.host }} (SDK not provisioned)"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: blocknet-${{ matrix.host }}
@@ -76,37 +75,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  guix-matrix-win-arm64:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Guix image
-        run: DOCKER_BUILDKIT=1 docker build -f contrib/guix/Dockerfile -t blocknet-guix:22.04 .
-      - name: Guix build aarch64-w64-mingw32 (required)
-        run: |
-          mkdir -p blocknet-binaries
-          set -o pipefail
-          HOSTS=aarch64-w64-mingw32 JOBS=$(nproc) ./contrib/guix/docker-run.sh aarch64-w64-mingw32 2>&1 | tee /tmp/guix-aarch64-w64-mingw32.log
-          EXIT=${PIPESTATUS[0]}
-          echo "EXIT:$EXIT" | tee -a /tmp/guix-aarch64-w64-mingw32.log
-          ls -R blocknet-binaries 2>&1 | head -n 30
-          cat /tmp/guix-aarch64-w64-mingw32.log | tail -n 30 || true
-          exit $EXIT
-      - name: Smoke check artifact
-        run: |
-          test -f blocknet-binaries/aarch64-w64-mingw32/*.zip || test -f blocknet-binaries/aarch64-w64-mingw32/*.exe || { echo "no artifact for aarch64-w64-mingw32 — FAIL"; exit 1; }
-          file blocknet-binaries/aarch64-w64-mingw32/* 2>&1 | head -n 20
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: blocknet-aarch64-w64-mingw32
-          path: |
-            blocknet-binaries/aarch64-w64-mingw32/*
-            /tmp/guix-aarch64-w64-mingw32.log
-          if-no-files-found: warn
-          retention-days: 3
-
   # ──────────────────────────────────────────────────────────────
   # Native sanity — single jammy job via Docker (not host apt)
   # Keeps one non-Guix path for quick feedback, still inside container.
@@ -115,12 +83,12 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Native build inside pinned container
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
             set -e
-            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates ccache bison curl > /dev/null
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates ccache bison bsdmainutils curl > /dev/null
             git config --global --add safe.directory /blocknet
             make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu > depends.log 2>&1; echo "depends EXIT:$?"
             ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
@@ -145,7 +113,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build + run unit tests inside pinned container
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
@@ -175,7 +143,7 @@ jobs:
           tail -n 60 make.log 2>/dev/null || true
       - name: Upload test logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: unit-test-logs
           path: |
@@ -194,7 +162,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build + run functional smoke subset inside pinned container
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
@@ -222,7 +190,7 @@ jobs:
           tail -n 60 make.log 2>/dev/null || true
       - name: Upload functional logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: functional-smoke-logs
           path: functional.log
@@ -233,7 +201,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Shellcheck, yaml lint, and repo lint checks (inside container)
         run: |
           docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '

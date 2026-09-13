@@ -130,9 +130,9 @@ CurrencyPair TxOutToCurrencyPair(const std::vector<CTxOut> & vout, std::string& 
     return CurrencyPair{
             xtx[0].get_str(),    // xid
             {ccy::Currency{xtx[1].get_str(),xbridge::TransactionDescr::COIN}, // fromCurrency
-             xtx[2].get_int64()},                                     // fromAmount
+             static_cast<ccy::Amount>(xtx[2].get_int64())},           // fromAmount
             {ccy::Currency{xtx[3].get_str(),xbridge::TransactionDescr::COIN}, // toCurrency
-             xtx[4].get_int64()}                                      // toAmount
+             static_cast<ccy::Amount>(xtx[4].get_int64())}            // toAmount
     };
 }
 

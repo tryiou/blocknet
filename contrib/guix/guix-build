@@ -457,7 +457,7 @@ EOF
         # Single attempt for deterministic builds — no retry on static failures (wastes time).
         # Transient fport_read failures are rare with persistent /gnu/store and no --disable-chroot.
         rc=0
-        if ! time-machine environment --manifest="${PWD}/contrib/guix/manifest.scm" \
+        if time-machine environment --manifest="${PWD}/contrib/guix/manifest.scm" \
                                      --container \
                                      --pure \
                                      --no-cwd \
