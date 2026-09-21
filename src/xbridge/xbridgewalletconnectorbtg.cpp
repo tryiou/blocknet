@@ -293,7 +293,7 @@ bool BTGWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inpu
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, reftxid, json))
     {
         LOG() << "btg decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = reftxid;
@@ -350,7 +350,7 @@ bool BTGWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & inp
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, paytxid, json))
     {
         LOG() << "btg decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = paytxid;

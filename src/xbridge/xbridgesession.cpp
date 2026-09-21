@@ -3000,17 +3000,59 @@ bool Session::Impl::processTransactionConfirmA(XBridgePacketPtr packet) const
 
     // payTx
     {
+        // Bounded redeem handling (see xBridgeRedeemRetryClass contract):
+        // transient wallet/propagation failures re-drive via processLater
+        // within the tries budget (the case that used to kill healthy funded
+        // swaps was a 0-conf parent the wallet had not seen yet); permanent
+        // pre-broadcast failures cancel via the standard abort path (nothing
+        // broadcast, refunds apply); send-stage failures with uncertain
+        // broadcast state expire to the watch loop (cancel unsafe there).
+        // Re-drive is idempotent (deposit re-check passes, ALREADY_IN_CHAIN
+        // counts as success, terminal states ignore the packet).
         int32_t errCode = 0;
         if (!redeemOrderCounterpartyDeposit(xtx, errCode)) {
-            if (errCode == RPCErrorCode::RPC_VERIFY_ERROR) { // missing inputs, wait deposit tx
-                LogOrderMsg(txid.GetHex(), "redeem counterparty failed, trying to redeem again", __FUNCTION__);
+            switch (xBridgeRedeemRetryClass(errCode, xtx->redeemTries(), xtx->maxRedeemTries(), xtx->isDoneWatching())) {
+            case xbridge::RedeemRetryClass::Retry: {
+                xtx->tryRedeem();
+                // Persist the budget increment immediately: the periodic
+                // orders.dat save is throttled (~30s), and a crash inside
+                // that window would otherwise reset the counter and allow
+                // unbounded retries across restarts.
+                xapp.saveOrders(true);
+                UniValue log_obj(UniValue::VOBJ);
+                log_obj.pushKV("orderid", txid.GetHex());
+                log_obj.pushKV("errCode", errCode);
+                log_obj.pushKV("redeem_tries", static_cast<int>(xtx->redeemTries()));
+                LogOrderMsg(log_obj, "redeem counterparty failed, trying again", __FUNCTION__);
                 xapp.processLater(txid, packet);
-                return true;
-            } else {
-                LogOrderMsg(txid.GetHex(), "failed to redeem p2sh deposit from counterparty, canceling", __FUNCTION__);
-                sendCancelTransaction(xtx, crBadBDepositTx);
-                return true;
+                break;
             }
+            case xbridge::RedeemRetryClass::CancelOrder: {
+                UniValue log_obj(UniValue::VOBJ);
+                log_obj.pushKV("orderid", txid.GetHex());
+                log_obj.pushKV("errCode", errCode);
+                LogOrderMsg(log_obj, "redeem counterparty failed permanently before broadcast, canceling", __FUNCTION__);
+                sendCancelTransaction(xtx, crBadBDepositTx);
+                break;
+            }
+            case xbridge::RedeemRetryClass::Expire: {
+                UniValue log_obj(UniValue::VOBJ);
+                log_obj.pushKV("orderid", txid.GetHex());
+                log_obj.pushKV("errCode", errCode);
+                log_obj.pushKV("redeem_tries", static_cast<int>(xtx->redeemTries()));
+                if (!xtx->isDoneWatching()) {
+                    // Pre-secret expiry: the watch loop only recovers
+                    // post-secret orders, so keep the packet alive instead
+                    // of dropping it.
+                    LogOrderMsg(log_obj, "redeem counterparty failed, retry budget exhausted and secret not yet known: keeping packet for re-drive", __FUNCTION__);
+                    xapp.processLater(txid, packet);
+                } else {
+                    LogOrderMsg(log_obj, "redeem counterparty failed, retry budget exhausted or broadcast uncertain: leaving to watch loop, NOT re-driving", __FUNCTION__);
+                }
+                break;
+            }
+            }
+            return true;
         }
     } // payTx
 
@@ -3190,9 +3232,53 @@ bool Session::Impl::processTransactionConfirmB(XBridgePacketPtr packet) const
 
     // payTx
     {
+        // Same bounded redeem contract as the maker ConfirmA site above
+        // (see xBridgeRedeemRetryClass): transient failures re-drive within
+        // the tries budget, pre-broadcast permanent failures cancel via the
+        // standard abort path, uncertain send failures expire to the watch
+        // loop. Previously this site retried unconditionally on every failure
+        // class with no budget.
         int32_t errCode = 0;
         if (!redeemOrderCounterpartyDeposit(xtx, errCode)) {
-            xapp.processLater(txid, packet); // trying again on failure
+            switch (xBridgeRedeemRetryClass(errCode, xtx->redeemTries(), xtx->maxRedeemTries(), xtx->isDoneWatching())) {
+            case xbridge::RedeemRetryClass::Retry: {
+                xtx->tryRedeem();
+                // Persist the budget increment immediately (see ConfirmA site).
+                xapp.saveOrders(true);
+                UniValue log_obj(UniValue::VOBJ);
+                log_obj.pushKV("orderid", txid.GetHex());
+                log_obj.pushKV("errCode", errCode);
+                log_obj.pushKV("redeem_tries", static_cast<int>(xtx->redeemTries()));
+                LogOrderMsg(log_obj, "redeem counterparty failed, trying again", __FUNCTION__);
+                xapp.processLater(txid, packet);
+                break;
+            }
+            case xbridge::RedeemRetryClass::CancelOrder: {
+                UniValue log_obj(UniValue::VOBJ);
+                log_obj.pushKV("orderid", txid.GetHex());
+                log_obj.pushKV("errCode", errCode);
+                LogOrderMsg(log_obj, "redeem counterparty failed permanently before broadcast, canceling", __FUNCTION__);
+                // Taker side: the counterparty deposit being redeemed is the
+                // maker A deposit, so report crBadADepositTx (ConfirmA reports
+                // crBadBDepositTx for the taker B deposit).
+                sendCancelTransaction(xtx, crBadADepositTx);
+                break;
+            }
+            case xbridge::RedeemRetryClass::Expire: {
+                UniValue log_obj(UniValue::VOBJ);
+                log_obj.pushKV("orderid", txid.GetHex());
+                log_obj.pushKV("errCode", errCode);
+                log_obj.pushKV("redeem_tries", static_cast<int>(xtx->redeemTries()));
+                if (!xtx->isDoneWatching()) {
+                    // Pre-secret expiry: keep the packet alive (see ConfirmA site).
+                    LogOrderMsg(log_obj, "redeem counterparty failed, retry budget exhausted and secret not yet known: keeping packet for re-drive", __FUNCTION__);
+                    xapp.processLater(txid, packet);
+                } else {
+                    LogOrderMsg(log_obj, "redeem counterparty failed, retry budget exhausted or broadcast uncertain: leaving to watch loop, NOT re-driving", __FUNCTION__);
+                }
+                break;
+            }
+            }
             return true;
         }
     } // payTx
@@ -3939,6 +4025,7 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
     if (!connFrom || !connTo) {
         LogOrderMsg(xtx->id.GetHex(), "failed to redeem order due to bad wallet connection, is " +
                                       (!connFrom ? xtx->fromCurrency : xtx->toCurrency) + " running?", __FUNCTION__);
+        errCode = RPCErrorCode::RPC_CLIENT_NOT_CONNECTED; // transient: wallet may be restarting
         return false;
     }
 
@@ -3949,6 +4036,7 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
         if (!connFrom->getSecretFromPaymentTransaction(xtx->otherPayTxId(), xtx->binTxId, xtx->binTxVout, xtx->oHashedSecret, x, isGood))
         {
             // Keep looking for the maker pay tx, move packet to pending
+            errCode = RPCErrorCode::RPC_VERIFY_ERROR; // transient: dependency not yet visible
             return false;
         }
         else if (!isGood)
@@ -3960,6 +4048,7 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
             log_obj.pushKV("my_spent_p2sh_deposit_txid", xtx->binTxId);
             log_obj.pushKV("my_spent_p2sh_deposit_vout", static_cast<int>(xtx->binTxVout));
             LogOrderMsg(log_obj, "secret not found in counterparty's pay tx on <" + xtx->fromCurrency + "> , counterparty could be misbehaving", __FUNCTION__);
+            errCode = 0; // explicit: pre-broadcast permanent -> CancelOrder class (see xBridgeRedeemRetryClass contract)
             return false;
         }
 
@@ -4010,6 +4099,12 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
                     << xtx->payTx;
             xtx->setLogPayTx2();
         }
+        // Transient/uncertain class (wallet RPC down during local build vs
+        // deterministic failure are indistinguishable here): bounded re-drive
+        // via Retry, then Expire to the watch loop. Never fast-cancel a
+        // funded swap from this path; CancelOrder is reserved for the
+        // bad-secret (!isGood) case above.
+        errCode = RPCErrorCode::RPC_CLIENT_NOT_CONNECTED;
         return false;
     }
 

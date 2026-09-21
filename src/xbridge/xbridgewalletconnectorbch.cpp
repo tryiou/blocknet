@@ -427,7 +427,7 @@ bool BchWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inpu
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, reftxid, json))
     {
         LOG() << "bch decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = reftxid;
@@ -485,7 +485,7 @@ bool BchWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & inp
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, paytxid, json))
     {
         LOG() << "bch decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = paytxid;

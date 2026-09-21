@@ -6,6 +6,7 @@
 //*****************************************************************************
 
 #include <xbridge/util/xutil.h>
+#include <rpc/protocol.h>
 #include <algorithm>
 #include <iterator>
 
@@ -338,6 +339,23 @@ bool xBridgeFundsSufficient(CAmount inDescr, CAmount requirementDescr) {
     // whose unconditional +1e-8 pad deterministically rejected exact ties
     // (10000 == 9800+100+100) with crNoMoney.
     return inDescr >= requirementDescr;
+}
+
+RedeemRetryClass xBridgeRedeemRetryClass(int32_t errCode, uint32_t tries, uint32_t maxTries, bool doneWatching) {
+    // Pre-broadcast permanent failure (bad secret: counterparty misbehaving).
+    // Nothing was broadcast, so the standard cancel abort path (refunds)
+    // applies unconditionally.
+    if (errCode == 0)
+        return RedeemRetryClass::CancelOrder;
+    // Transient: dependency not yet visible or wallet down. Bounded re-drive;
+    // the watch loop owns recovery beyond the budget.
+    if (!doneWatching && tries < maxTries &&
+        (errCode == RPCErrorCode::RPC_VERIFY_ERROR ||
+         errCode == RPCErrorCode::RPC_CLIENT_NOT_CONNECTED))
+        return RedeemRetryClass::Retry;
+    // Anything else (send-stage failures with uncertain broadcast state):
+    // expire to the watch loop. Cancel is unsafe once the pay tx may be out.
+    return RedeemRetryClass::Expire;
 }
 
 bool xBridgeValidCoin(const std::string coin)

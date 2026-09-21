@@ -180,7 +180,7 @@ bool StealthWalletConnector::createRefundTransaction(const std::vector<XTxIn> & 
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, reftxid, json))
     {
         LOG() << "stealth decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = reftxid;
@@ -235,7 +235,7 @@ bool StealthWalletConnector::createPaymentTransaction(const std::vector<XTxIn> &
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, paytxid, json))
     {
         LOG() << "stealth decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = paytxid;

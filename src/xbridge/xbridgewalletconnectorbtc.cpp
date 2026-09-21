@@ -1268,6 +1268,7 @@ bool sendRawTransaction(const std::string & rpcuser,
         {
             // Result
             LOG() << "result not an string " << result.write(4, 1);
+            errorCode = -1;
             return false;
         }
 
@@ -2529,7 +2530,7 @@ bool BtcWalletConnector<CryptoProvider>::createRefundTransaction(const std::vect
     {
         LOG() << "decode signed transaction error, transaction canceled " << __FUNCTION__;
 //            sendCancelTransaction(xtx, crRpcError);
-            return true;
+            return false;
     }
 
     txId  = reftxid;
@@ -2593,7 +2594,7 @@ bool BtcWalletConnector<CryptoProvider>::createPaymentTransaction(const std::vec
     {
             LOG() << "decode signed transaction error, transaction canceled " << __FUNCTION__;
 //                sendCancelTransaction(xtx, crRpcError);
-        return true;
+        return false;
     }
 
     txId  = paytxid;

@@ -226,6 +226,36 @@ BOOST_AUTO_TEST_CASE(xbridge_funds_sufficient_exactfit) {
     BOOST_CHECK(xbridge::xBridgeFundsSufficient(xbridge::xBridgeIntFromReal(0.02), requirement));
 }
 
+// orders.dat upgrade compat: the v2 counter is appended at the end of the
+// serialization stream. A v2 round-trip preserves it; a version 1 blob
+// (simulated by stripping the trailing uint32) must still load with the
+// counter defaulted to 0 and earlier fields intact.
+BOOST_AUTO_TEST_CASE(xbridge_redeem_tries_ser_compat) {
+    xbridge::TransactionDescr d;
+    d.fromAmount = 9800;
+    d.tryRedeem();
+    d.tryRedeem();
+    CDataStream ss(SER_DISK, 0);
+    ss << d;
+    // snapshot before extraction: a fully consumed CDataStream clears its
+    // buffer, so the version 1 prefix must be cut from the raw bytes first.
+    std::vector<unsigned char> raw(ss.begin(), ss.end());
+    xbridge::TransactionDescr d2;
+    ss >> d2;
+    BOOST_CHECK_EQUAL(d2.fromAmount, uint64_t{9800});
+    BOOST_CHECK_EQUAL(d2.redeemTries(), 2u);
+    BOOST_CHECK_EQUAL(d2.maxRedeemTries(), 2u);
+    std::vector<unsigned char> v1(raw.begin(), raw.end() - 4);
+    // a true version 1 blob carries nVersion==1 in its first four bytes
+    // (little-endian int); patch the version, not just the length.
+    v1[0] = 1; v1[1] = 0; v1[2] = 0; v1[3] = 0;
+    CDataStream s1(v1, SER_DISK, 0);
+    xbridge::TransactionDescr d1;
+    BOOST_CHECK_NO_THROW(s1 >> d1);
+    BOOST_CHECK_EQUAL(d1.fromAmount, uint64_t{9800});
+    BOOST_CHECK_EQUAL(d1.redeemTries(), 0u);
+}
+
 // Documents the session utxo-consumption sequence
 // (xbridgesession.cpp processTransactionCreateA loop): fee1 recomputed per
 // consumed utxo as minTxFee1(usedCount,3), fee2 fixed minTxFee2(1,1). This is
@@ -297,6 +327,33 @@ BOOST_AUTO_TEST_CASE(xbridge_predicate_sequence) {
     BOOST_CHECK_EQUAL(req2, CAmount{10512});
     BOOST_CHECK(!xbridge::xBridgeFundsSufficient(CAmount{5300}, req2));
     BOOST_CHECK(xbridge::xBridgeFundsSufficient(CAmount{10600}, req2));
+}
+
+// Redeem-retry policy (xbridgesession.cpp processTransactionConfirmA payTx
+// block): transient wallet/propagation failures re-drive bounded by tries,
+// pre-broadcast permanent failures cancel (nothing broadcast yet, matches the
+// long-standing crBadBDepositTx abort path), and post-broadcast-uncertain
+// failures expire to the watch loop (cancel unsafe: pay tx may be out).
+BOOST_AUTO_TEST_CASE(xbridge_redeem_retry_policy) {
+    using R = xbridge::RedeemRetryClass;
+    // Transient: missing inputs / wallet not connected -> retry while budget remains.
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_VERIFY_ERROR, 0, 2, false) == R::Retry);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_VERIFY_ERROR, 1, 2, false) == R::Retry);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_CLIENT_NOT_CONNECTED, 0, 2, false) == R::Retry);
+    // Budget exhausted or watching done -> expire, never loop forever.
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_VERIFY_ERROR, 2, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_VERIFY_ERROR, 0, 2, true) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_CLIENT_NOT_CONNECTED, 2, 2, false) == R::Expire);
+    // Pre-broadcast permanent (bad secret: counterparty misbehaving; callee
+    // sets errCode 0 only for this case) -> cancel abort path. Local build
+    // failures map to a transient code (bounded Retry, then Expire) so a
+    // wallet outage never fast-cancels a funded swap.
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(0, 0, 2, false) == R::CancelOrder);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(0, 2, 2, true) == R::CancelOrder);
+    // Send-stage uncertain (non-verify errors, pay tx possibly broadcast) ->
+    // expire to watch loop; cancel would risk stranding funds.
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-26, 0, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_MISC_ERROR, 0, 2, false) == R::Expire);
 }
 
 // Exact amount strings for the wallet RPC (replaces double serialization):
