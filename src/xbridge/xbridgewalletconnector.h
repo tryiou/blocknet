@@ -27,12 +27,15 @@ struct XTxIn
 {
     std::string txid;
     uint32_t    n;
-    double      amount;
+    // Input value in wallet base units (satoshis). Integer: doubles must
+    // never flow into locally built transactions (truncation in
+    // `double * COIN` -> CTxOut drops a sat, e.g. 0.0098).
+    CAmount     amountSats;
 
-    XTxIn(std::string _txid, uint32_t _n, double _amount)
+    XTxIn(std::string _txid, uint32_t _n, CAmount _amountSats)
         : txid(_txid)
         , n(_n)
-        , amount(_amount)
+        , amountSats(_amountSats)
     {}
 };
 
@@ -156,23 +159,26 @@ public:
                                            const uint32_t lockTime,
                                            std::vector<unsigned char> & resultSript) = 0;
 
+    // outputs carry exact decimal strings (xBridgeAmountToString): doubles
+    // must never reach the wallet RPC (setprecision(16) can exceed the
+    // wallet's 8 decimals -> code -3 "Invalid amount").
     virtual bool createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                          const std::vector<std::pair<std::string, double> > & outputs,
+                                          const std::vector<std::pair<std::string, std::string> > & outputs,
                                           std::string & txId,
                                           uint32_t & txVout,
                                           std::string & rawTx) = 0;
 
     virtual bool createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                         const std::vector<std::pair<std::string, double> > & outputs,
-                                         const std::vector<unsigned char> & mpubKey,
-                                         const std::vector<unsigned char> & mprivKey,
-                                         const std::vector<unsigned char> & innerScript,
-                                         const uint32_t lockTime,
-                                         std::string & txId,
-                                         std::string & rawTx) = 0;
+                                          const std::vector<std::pair<std::string, CAmount> > & outputs,
+                                          const std::vector<unsigned char> & mpubKey,
+                                          const std::vector<unsigned char> & mprivKey,
+                                          const std::vector<unsigned char> & innerScript,
+                                          const uint32_t lockTime,
+                                          std::string & txId,
+                                          std::string & rawTx) = 0;
 
     virtual bool createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                          const std::vector<std::pair<std::string, double> > & outputs,
+                                           const std::vector<std::pair<std::string, CAmount> > & outputs,
                                           const std::vector<unsigned char> & mpubKey,
                                           const std::vector<unsigned char> & mprivKey,
                                           const std::vector<unsigned char> & xpubKey,
@@ -181,7 +187,7 @@ public:
                                           std::string & rawTx) = 0;
 
     virtual bool createPartialTransaction(const std::vector<XTxIn> inputs,
-                                          const std::vector<std::pair<std::string, double> > outputs,
+                                          const std::vector<std::pair<std::string, CAmount> > outputs,
                                           std::string & txId,
                                           std::string & rawTx) = 0;
 

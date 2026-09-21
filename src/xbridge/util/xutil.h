@@ -78,6 +78,16 @@ namespace xbridge
     double xBridgeValueFromAmount(CAmount amount);
     CAmount xBridgeIntFromReal(double val);
     CAmount xBridgeAmountFromReal(double val);
+    std::string xBridgeAmountToString(CAmount descrAmount);
+    // Exact integer conversion from descr units (TransactionDescr::COIN = 1e6
+    // per coin) to wallet base units (walletCoin per coin, usually 1e8).
+    // Pure integer math, no double involved.
+    CAmount xBridgeDescrToSats(CAmount descrAmount, uint64_t walletCoin);
+    // Convert a wallet coin-denominated double (e.g. UTXO amount, minTxFee)
+    // to integer base units, rounding to nearest. Safe because wallet RPC
+    // values carry at most 8 decimals and magnitudes are far below 2^53.
+    CAmount xBridgeWalletSatsFromReal(double coinAmount, uint64_t walletCoin);
+    bool xBridgeFundsSufficient(CAmount inDescr, CAmount requirementDescr);
     std::string xBridgeStringValueFromPrice(double price);
     std::string xBridgeStringValueFromPrice(double price, uint64_t denomination);
     std::string xBridgeStringValueFromAmount(CAmount amount);

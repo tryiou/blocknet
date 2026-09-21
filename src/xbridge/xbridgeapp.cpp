@@ -1783,7 +1783,7 @@ xbridge::Error App::sendXBridgeTransaction(const std::string & from,
                 }
             } else if (autoSplit) { // If no user supplied utxos, create the partial order prep transaction
                 std::vector<wallet::UtxoEntry> existingUtxos;
-                double vinsTotal{0};
+                CAmount vinsTotalSats{0};
                 std::vector<xbridge::XTxIn> vins;
                 for (const auto & vin : ptr->usedCoins) {
                     // If we already have exact utxos, skip consuming those and subtract from expected total
@@ -1793,29 +1793,33 @@ xbridge::Error App::sendXBridgeTransaction(const std::string & from,
                         partialVoutsTotal -= partialMinimum + partialPerUtxoFees;
                         continue;
                     }
-                    vinsTotal += vin.amount;
-                    vins.emplace_back(vin.txId, vin.vout, vin.amount);
+                    const CAmount vinSats = xBridgeWalletSatsFromReal(vin.amount, connFrom->COIN);
+                    vinsTotalSats += vinSats;
+                    vins.emplace_back(vin.txId, vin.vout, vinSats);
                 }
 
-                std::vector<std::pair<std::string, double>> vouts;
+                // Exact integer outputs (descr -> wallet sats, no doubles)
+                std::vector<std::pair<std::string, CAmount>> vouts;
                 for (int i = 0; i < partialUtxosRequiredForMinimum; ++i)
-                    vouts.emplace_back(ptr->fromAddr, xBridgeValueFromAmount(partialMinimum + partialPerUtxoFees));
+                    vouts.emplace_back(ptr->fromAddr, xBridgeDescrToSats(partialMinimum + partialPerUtxoFees, connFrom->COIN));
                 // add remainder vout if not dust
                 if (partialRemainderRequired && !partialRemainderIsDust)
-                    vouts.emplace_back(ptr->fromAddr, xBridgeValueFromAmount(partialRemainderVoutTotal + partialPerUtxoFees));
+                    vouts.emplace_back(ptr->fromAddr, xBridgeDescrToSats(partialRemainderVoutTotal + partialPerUtxoFees, connFrom->COIN));
                 // Change
-                const double changeAmount = vinsTotal - xBridgeValueFromAmount(partialVoutsTotal) - connFrom->minTxFee1(vins.size(), vouts.size()+1); // vouts + 1 for change
-                if (changeAmount < std::numeric_limits<double>::epsilon()) {
+                const CAmount voutsTotalSats = xBridgeDescrToSats(partialVoutsTotal, connFrom->COIN);
+                const CAmount prepFeeSats = xBridgeWalletSatsFromReal(connFrom->minTxFee1(vins.size(), vouts.size()+1), connFrom->COIN); // vouts + 1 for change
+                const CAmount changeSats = vinsTotalSats - voutsTotalSats - prepFeeSats;
+                if (changeSats <= 0) {
                     unlockCoins(ptr->fromCurrency, ptr->usedCoins);
                     UniValue log_obj(UniValue::VOBJ);
                     log_obj.pushKV("orderid", "unknown");
-                    log_obj.pushKV("change_amount", xBridgeStringValueFromPrice(changeAmount, connFrom->COIN));
+                    log_obj.pushKV("change_amount", xBridgeStringValueFromPrice(static_cast<double>(changeSats) / connFrom->COIN, connFrom->COIN));
                     log_obj.pushKV("from_currency", connFrom->currency);
                     xbridge::LogOrderMsg(log_obj, "failed to create order, insufficient funds on partial order", __FUNCTION__);
                     return xbridge::Error::INVALID_AMOUNT;
                 }
-                if (!connFrom->isDustAmount(changeAmount))
-                    vouts.emplace_back(ptr->fromAddr, changeAmount);
+                if (!connFrom->isDustAmount(static_cast<double>(changeSats) / connFrom->COIN))
+                    vouts.emplace_back(ptr->fromAddr, changeSats);
 
                 std::string txid, rawtx;
                 if (!connFrom->createPartialTransaction(vins, vouts, txid, rawtx)) {
@@ -1853,7 +1857,8 @@ xbridge::Error App::sendXBridgeTransaction(const std::string & from,
                     xbridge::wallet::UtxoEntry entry;
                     entry.txId = txid;
                     entry.vout = i;
-                    entry.amount = vouts[i].second;
+                    // vouts carry wallet sats; UtxoEntry.amount is coin double
+                    entry.amount = static_cast<double>(vouts[i].second) / connFrom->COIN;
                     entry.address = connFrom->fromXAddr(connFrom->toXAddr(vouts[i].first));
                     ptr->usedCoins.push_back(entry);
                     partialNewTotalUtxosAmount += entry.camount();

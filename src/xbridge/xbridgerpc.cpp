@@ -348,89 +348,9 @@ bool getInfo(const std::string & rpcuser,
 
 //*****************************************************************************
 //*****************************************************************************
-bool createRawTransaction(const std::string & rpcuser,
-                          const std::string & rpcpasswd,
-                          const std::string & rpcip,
-                          const std::string & rpcport,
-                          const std::vector<std::pair<string, int> > & inputs,
-                          const std::vector<std::pair<std::string, double> > & outputs,
-                          const uint32_t lockTime,
-                          std::string & tx,
-                          const bool cltv=false)
-{
-    try
-    {
-        LOG() << "rpc call <createrawtransaction>";
-
-        // inputs
-        UniValue i(UniValue::VARR);
-        for (const std::pair<string, int> & input : inputs)
-        {
-            UniValue tmp(UniValue::VOBJ);
-            tmp.pushKV("txid", input.first);
-            tmp.pushKV("vout", input.second);
-            if (cltv)
-                tmp.pushKV("sequence", static_cast<int64_t>(xbridge::SEQUENCE_FINAL));
-            i.push_back(tmp);
-        }
-
-        // outputs
-        UniValue o(UniValue::VOBJ);
-        for (const std::pair<std::string, double> & dest : outputs)
-        {
-            o.pushKV(dest.first, dest.second);
-        }
-
-        UniValue params(UniValue::VARR);
-        params.push_back(i);
-        params.push_back(o);
-
-        // locktime
-        if (lockTime > 0)
-        {
-            params.push_back(uint64_t(lockTime));
-        }
-
-        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "createrawtransaction", params);
-
-        // Parse reply
-        const UniValue & result = find_value(reply, "result");
-        const UniValue & error  = find_value(reply, "error");
-
-        if (!error.isNull())
-        {
-            // Error
-            LOG() << "error: " << error.write();
-            // int code = find_value(error.get_obj(), "code").get_int();
-            return false;
-        }
-        else if (!result.isStr())
-        {
-            // Result
-            LOG() << "result not an string " <<
-                     (result.isNull() ? "" :
-                                                   result.write(4, 1));
-            return false;
-        }
-
-        tx = result.write();
-        if (tx[0] == '\"')
-        {
-            tx.erase(0, 1);
-        }
-        if (tx[tx.size()-1] == '\"')
-        {
-            tx.erase(tx.size()-1, 1);
-        }
-    }
-    catch (std::exception & e)
-    {
-        LOG() << "createrawtransaction exception " << e.what();
-        return false;
-    }
-
-    return true;
-}
+// NOTE: the pair<string,int> overload of createRawTransaction was removed:
+// it had zero callers and duplicated the double-serialization hazard below.
+// The single live overload takes XTxIn inputs (xbridgewalletconnectorbtc.cpp).
 
 //*****************************************************************************
 //*****************************************************************************

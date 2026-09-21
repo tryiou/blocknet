@@ -3,8 +3,16 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <test/test_bitcoin.h>
+#include <rpc/protocol.h>
+#include <serialize.h>
+#include <streams.h>
+#include <util/moneystr.h>
+#include <xbridge/xbridgeapp.h>
 #include <xbridge/util/xutil.h>
 #include <boost/test/unit_test.hpp>
+
+#include <iomanip>
+#include <sstream>
 
 BOOST_FIXTURE_TEST_SUITE(xbridge_tests, BasicTestingSetup)
 
@@ -158,6 +166,231 @@ BOOST_AUTO_TEST_CASE(xbridge_orderinfo_json_serialization) {
     BOOST_CHECK_EQUAL(back[2].get_int64(), int64_t{11220000});
     BOOST_CHECK_EQUAL(back[3].get_str(), "LTC");
     BOOST_CHECK_EQUAL(back[4].get_int64(), int64_t{5000000});
+}
+
+// Replicates the live mainnet crNoMoney cancel of a fundable exact-fit order
+// (0.0098 BLOCK order funded by a single 0.01000000 utxo): the deposit
+// selector accepts the utxo (its requirement side is unpadded), while the
+// session funding check pads the requirement with +1e-8
+// (xBridgeValueFromAmount "round up 1 sat"), so the exact fit is deterministically
+// rejected and the order cancelled crNoMoney. The contract under test: a utxo
+// set returned by selectUtxos must satisfy the session funding check when the
+// integer ledger ties (utxoAmount >= orderAmount + fee1 + fee2 in descr units).
+BOOST_AUTO_TEST_CASE(xbridge_funds_sufficient_exactfit) {
+    // Deterministic connector fees, mirroring MinTxFee=10000 / FeePerByte=20:
+    // (192*in + 34*out) * feePerByte, floored at 10000 sats, wallet COIN 1e8.
+    auto minTxFee = [](const uint32_t in, const uint32_t out) -> double {
+        uint64_t fee = (192 * in + 34 * out) * 20;
+        if (fee < 10000)
+            fee = 10000;
+        return static_cast<double>(fee) / 100000000.0;
+    };
+
+    xbridge::wallet::UtxoEntry utxo;
+    utxo.txId = "e070c50c5b09407a87af23e53e681b7a37bae3519819726b6fb62b90957e574f";
+    utxo.vout = 0;
+    utxo.amount = 0.01; // exactly 1,000,000 sats
+    utxo.address = "";
+
+    std::vector<xbridge::wallet::UtxoEntry> forUse;
+    uint64_t utxoAmount{0}, fee1{0}, fee2{0};
+
+    // Selector accepts the exact-fit utxo (requirement side unpadded).
+    BOOST_CHECK(xbridge::App::instance().selectUtxos("", {utxo}, minTxFee, minTxFee,
+                 9800, xbridge::TransactionDescr::COIN, forUse, utxoAmount, fee1, fee2));
+    BOOST_CHECK_EQUAL(forUse.size(), 1);
+    BOOST_CHECK_EQUAL(utxoAmount, uint64_t{10000}); // 0.01 * 1e6 descr
+    BOOST_CHECK_EQUAL(fee1, uint64_t{100});
+    BOOST_CHECK_EQUAL(fee2, uint64_t{100});
+
+    // The session funding check (xbridgesession.cpp processTransactionCreateA)
+    // must accept the very selection the selector returned: the integer
+    // ledger ties exactly (10000 = 9800 + 100 + 100). Accumulated the way the
+    // session does (running-double total converted per step).
+    const CAmount requirement = 9800 + static_cast<CAmount>(fee1) + static_cast<CAmount>(fee2);
+    double inAmount = 0;
+    CAmount cinAmount = 0;
+    for (const auto & u : forUse) {
+        inAmount += u.amount;
+        cinAmount = xbridge::xBridgeIntFromReal(inAmount);
+    }
+    BOOST_CHECK_MESSAGE(xbridge::xBridgeFundsSufficient(cinAmount, requirement),
+                        "exact-fit utxo selected by selectUtxos must pass the session funding check");
+
+    // Overcorrection guards: a genuinely short selection must still fail,
+    // down to a single descr unit (9999 vs 10000).
+    BOOST_CHECK(!xbridge::xBridgeFundsSufficient(xbridge::xBridgeIntFromReal(0.0098), requirement));
+    BOOST_CHECK(!xbridge::xBridgeFundsSufficient(CAmount{9999}, CAmount{10000}));
+    BOOST_CHECK(xbridge::xBridgeFundsSufficient(CAmount{10000}, CAmount{10000}));
+    // A comfortable margin must pass.
+    BOOST_CHECK(xbridge::xBridgeFundsSufficient(xbridge::xBridgeIntFromReal(0.02), requirement));
+}
+
+// Documents the session utxo-consumption sequence
+// (xbridgesession.cpp processTransactionCreateA loop): fee1 recomputed per
+// consumed utxo as minTxFee1(usedCount,3), fee2 fixed minTxFee2(1,1). This is
+// a formula reference, NOT gate coverage: the gate itself lives inline in the
+// packet handler and is covered by xbridge_funds_sufficient_exactfit (live
+// predicate), xbridge_predicate_sequence below (live predicate, multi-step),
+// and the live swap matrix. If this replica and the session ever disagree on
+// fee math, the independently recomputed expectations below fail first.
+struct ConsumeReplicaResult { std::vector<double> used; CAmount requirement; };
+static ConsumeReplicaResult consumeReplica(const std::vector<double> & coins,
+                                           const uint64_t feePerByte)
+{
+    const CAmount coutAmount = 9800;
+    uint64_t s2 = (192 * 1 + 34 * 1) * feePerByte;
+    if (s2 < 10000)
+        s2 = 10000;
+    const CAmount cfee2 = static_cast<CAmount>(s2 / 100); // floored sats -> descr
+    double inAmount = 0;
+    CAmount cinAmount = 0, cfee1 = 0, req = 0;
+    std::vector<double> used;
+    for (const double c : coins) {
+        if (!used.empty() && cinAmount >= req)
+            break; // non-partial: done
+        used.push_back(c);
+        inAmount += c;
+        cinAmount = xbridge::xBridgeIntFromReal(inAmount);
+        uint64_t s = (192 * used.size() + 34 * 3) * feePerByte;
+        if (s < 10000)
+            s = 10000;
+        cfee1 = static_cast<CAmount>(s / 100);
+        req = coutAmount + cfee1 + cfee2;
+    }
+    return {used, req};
+}
+
+BOOST_AUTO_TEST_CASE(xbridge_consume_gate_exactfit) {
+    // Spare utxo available: the integer gate (now live in
+    // processTransactionCreateA) exits on the exact tie after the first utxo
+    // instead of over-consuming. (The former padded-double gate consumed both;
+    // that failure was captured red before the rewire.)
+    ConsumeReplicaResult integer = consumeReplica({0.01, 0.005}, 20);
+    BOOST_CHECK_MESSAGE(integer.used.size() == 1,
+        "integer loop gate must stop on exact tie, used=" << integer.used.size());
+    BOOST_CHECK_EQUAL(integer.requirement, CAmount{10000});
+    // Fee-growth lock-in: with feePerByte=100 the requirement grows per input
+    // (step1: 9800+294+226=10320, step2: 9800+486+226=10512, independently
+    // recomputed); two 0.0053 utxos (10600 descr) must both be consumed and pass.
+    ConsumeReplicaResult growth = consumeReplica({0.0053, 0.0053}, 100);
+    BOOST_CHECK_EQUAL(growth.used.size(), 2);
+    BOOST_CHECK_EQUAL(growth.requirement, CAmount{10512});
+    BOOST_CHECK(growth.used.size() == 2 &&
+                xbridge::xBridgeIntFromReal(0.0053 + 0.0053) >= growth.requirement);
+}
+
+// Drives the LIVE funding predicate through a multi-step accumulation with
+// independently recomputed fees (feePerByte=100, floor 10000 sats): after
+// each consumed utxo the session's requirement is cout+cfee1(N)+cfee2 and the
+// gate must agree step by step (fail, fail, pass). Guards production drift
+// that a formula replica cannot catch.
+BOOST_AUTO_TEST_CASE(xbridge_predicate_sequence) {
+    const CAmount cout = 9800;
+    const CAmount cfee2 = 226; // (192+34)*100=22600 sats -> 226 descr, no floor
+    // step 1: one 0.0053 utxo; cfee1(1)=(192+102)*100=29400 -> 294
+    CAmount req1 = cout + 294 + cfee2; // 10320
+    BOOST_CHECK_EQUAL(req1, CAmount{10320});
+    BOOST_CHECK(!xbridge::xBridgeFundsSufficient(CAmount{5300}, req1));
+    // step 2: second 0.0053 utxo; cfee1(2)=(384+102)*100=48600 -> 486
+    CAmount req2 = cout + 486 + cfee2; // 10512
+    BOOST_CHECK_EQUAL(req2, CAmount{10512});
+    BOOST_CHECK(!xbridge::xBridgeFundsSufficient(CAmount{5300}, req2));
+    BOOST_CHECK(xbridge::xBridgeFundsSufficient(CAmount{10600}, req2));
+}
+
+// Exact amount strings for the wallet RPC (replaces double serialization):
+// descr units (TransactionDescr::COIN=1e6) formatted as exact decimals with
+// six fractional digits. By construction never more than six decimals, so the
+// wallet's ParseFixedPoint(8) always accepts them.
+BOOST_AUTO_TEST_CASE(xbridge_amount_string_exact) {
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{9900}), "0.009900");
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{100}), "0.000100");
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{9800}), "0.009800");
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{10000}), "0.010000");
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{1}), "0.000001");
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{0}), "0.000000");
+    BOOST_CHECK_EQUAL(xbridge::xBridgeAmountToString(CAmount{123456789}), "123.456789");
+}
+
+BOOST_AUTO_TEST_CASE(xbridge_amount_string_wallet_parseable) {
+    // 1 descr unit = 100 wallet sats (1e6 descr per coin, 1e8 sats per coin).
+    struct Case { CAmount descr; CAmount sats; };
+    const std::vector<Case> cases = {{9900, 990000}, {100, 10000}, {9800, 980000},
+                                     {10000, 1000000}, {1, 100}, {0, 0}};
+    for (const auto & c : cases) {
+        CAmount sats = -1;
+        BOOST_REQUIRE_MESSAGE(ParseFixedPoint(xbridge::xBridgeAmountToString(c.descr), 8, &sats),
+                              "descr " << c.descr << " must wallet-parse");
+        BOOST_CHECK_EQUAL(sats, c.sats);
+    }
+}
+
+// Live S10 failure kept as a permanent guard: the former double path feeds
+// outAmount+fee2 (padded doubles) through UniValue setprecision(16), which
+// emits an 18-decimal string the wallet rejects with code -3 Invalid amount.
+BOOST_AUTO_TEST_CASE(xbridge_deposit_double_serialization_rejected) {
+    const double deposit = xbridge::xBridgeValueFromAmount(9800) + xbridge::xBridgeValueFromAmount(100);
+    std::ostringstream oss;
+    oss << std::setprecision(16) << deposit; // mirrors UniValue::setFloat
+    CAmount amt = 0;
+    BOOST_CHECK_MESSAGE(!ParseFixedPoint(oss.str(), 8, &amt),
+                        "old double path must stay unparsable, serialized=" << oss.str());
+}
+
+// Integer descr -> wallet sats conversion (refund/payment/prep outputs):
+// pure integer math, exact for all magnitudes below 2^53 base units.
+BOOST_AUTO_TEST_CASE(xbridge_descr_to_sats) {
+    // 1 descr unit = 100 wallet sats (1e6 descr per coin, 1e8 sats per coin).
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800}, 100000000), CAmount{980000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{100}, 100000000), CAmount{10000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{1}, 100000000), CAmount{100});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{0}, 100000000), CAmount{0});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{123456789}, 100000000), CAmount{12345678900});
+    // Heterogeneous wallet COIN (e.g. 1e6 base units per coin): identity.
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800}, 1000000), CAmount{9800});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{1}, 1000000), CAmount{1});
+}
+
+// Wallet coin-double -> integer sats uses nearest rounding (not truncation):
+// 0.0098 * 1e8 truncates to 979999 as double, the exact value is 980000.
+BOOST_AUTO_TEST_CASE(xbridge_wallet_sats_from_real) {
+    BOOST_CHECK_EQUAL(xbridge::xBridgeWalletSatsFromReal(0.01, 100000000), CAmount{1000000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeWalletSatsFromReal(0.0098, 100000000), CAmount{980000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeWalletSatsFromReal(0.0001, 100000000), CAmount{10000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeWalletSatsFromReal(0.0, 100000000), CAmount{0});
+    // Fee-scale values round-trip exactly (minTxFee ratio math is integer
+    // sats over COIN, magnitudes far below 2^53).
+    BOOST_CHECK_EQUAL(xbridge::xBridgeWalletSatsFromReal(10000.0 / 100000000.0, 100000000), CAmount{10000});
+}
+
+// Payment output rule (mirrors redeemOrderCounterpartyDeposit): exact
+// on-chain P2SH sats less the integer redeem fee, paying excess only when
+// the deposit strictly covers amount + fee (checkDepositTransaction rule).
+BOOST_AUTO_TEST_CASE(xbridge_payment_sats_rule) {
+    const auto excessRule = [](uint64_t p2sh, CAmount toSats, CAmount fee2sats) {
+        return (p2sh > static_cast<uint64_t>(toSats + fee2sats))
+                   ? static_cast<CAmount>(p2sh) - toSats - fee2sats
+                   : 0;
+    };
+    const CAmount toSats{980000}, fee2sats{10000};
+    // Exact deposit: no excess, output is the order amount.
+    BOOST_CHECK_EQUAL(excessRule(990000, toSats, fee2sats), CAmount{0});
+    // Overpaid deposit: excess paid to redeemer.
+    BOOST_CHECK_EQUAL(excessRule(995000, toSats, fee2sats), CAmount{5000});
+    // Marginally short deposit (fee tolerance band): output stays the order
+    // amount, never reduced by truncation.
+    BOOST_CHECK_EQUAL(excessRule(989999, toSats, fee2sats), CAmount{0});
+    // Refund rule: order amount converts exactly, input is amount + fee.
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800}, 100000000), toSats);
+    BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800 + 100}, 100000000), CAmount{990000});
+}
+
+// XTxIn carries integer wallet sats (no double -> no truncation in
+// locally built refund/payment txs or segwit sighash amounts).
+BOOST_AUTO_TEST_CASE(xbridge_xtxin_carries_sats) {
+    xbridge::XTxIn in("aaabbb", 1, CAmount{980000});
+    BOOST_CHECK_EQUAL(in.amountSats, CAmount{980000});
 }
 
 BOOST_AUTO_TEST_SUITE_END()

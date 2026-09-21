@@ -272,13 +272,13 @@ public:
                                    std::vector<unsigned char> & resultSript);
 
     bool createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                  const std::vector<std::pair<std::string, std::string> > & outputs,
                                   std::string & txId,
                                   uint32_t & txVout,
                                   std::string & rawTx);
 
     bool createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                 const std::vector<std::pair<std::string, double> > & outputs,
+                                 const std::vector<std::pair<std::string, CAmount> > & outputs,
                                  const std::vector<unsigned char> & mpubKey,
                                  const std::vector<unsigned char> & mprivKey,
                                  const std::vector<unsigned char> & innerScript,
@@ -287,7 +287,7 @@ public:
                                  std::string & rawTx);
 
     bool createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                  const std::vector<std::pair<std::string, CAmount> > & outputs,
                                   const std::vector<unsigned char> & mpubKey,
                                   const std::vector<unsigned char> & mprivKey,
                                   const std::vector<unsigned char> & xpubKey,
@@ -296,7 +296,7 @@ public:
                                   std::string & rawTx);
 
     bool createPartialTransaction(const std::vector<XTxIn> inputs,
-                              const std::vector<std::pair<std::string, double> > outputs,
+                              const std::vector<std::pair<std::string, CAmount> > outputs,
                               std::string & txId,
                               std::string & rawTx) override;
 

@@ -14,6 +14,7 @@
 #include <amount.h>
 
 #include <ctime>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -289,6 +290,54 @@ CAmount xBridgeIntFromReal(double utxo_amount) {
 
 CAmount xBridgeAmountFromReal(double val) {
     return xBridgeIntFromReal(val);
+}
+
+std::string xBridgeAmountToString(CAmount descrAmount) {
+    // Exact decimal from integer descr units (TransactionDescr::COIN = 1e6
+    // units per coin): six fractional digits, no double involved. The result
+    // never exceeds six decimals, so the wallet's ParseFixedPoint(8) always
+    // accepts it — unlike setprecision(16) serialization of the equivalent
+    // double, which can emit 18 decimals and is rejected with code -3
+    // "Invalid amount" (live crBadADepositTx on an exact-fit order).
+    const bool neg = descrAmount < 0;
+    // INT64_MIN-safe negation: -(n+1)+1 avoids signed overflow on negation.
+    const uint64_t n = neg ? static_cast<uint64_t>(-(descrAmount + 1)) + 1u
+                           : static_cast<uint64_t>(descrAmount);
+    std::ostringstream oss;
+    if (neg)
+        oss << '-';
+    oss << (n / 1000000) << '.' << std::setw(6) << std::setfill('0') << (n % 1000000);
+    return oss.str();
+}
+
+CAmount xBridgeDescrToSats(CAmount descrAmount, uint64_t walletCoin) {
+    // Pure integer: descr units are 1e6 per coin, wallet units are
+    // walletCoin per coin. Rounds toward zero; inputs are non-negative on
+    // the swap path (refund/payment), negative only in tests.
+    return descrAmount * static_cast<CAmount>(walletCoin) / xbridge::TransactionDescr::COIN;
+}
+
+CAmount xBridgeWalletSatsFromReal(double coinAmount, uint64_t walletCoin) {
+    // Nearest-sat rounding (not truncation): wallet RPC doubles carry at
+    // most 8 decimals, so llround recovers the exact integer for all
+    // realistic magnitudes (< 2^53 base units).
+    return static_cast<CAmount>(std::llround(coinAmount * static_cast<double>(walletCoin)));
+}
+
+bool xBridgeFundsSufficient(CAmount inDescr, CAmount requirementDescr) {
+    // Canonical funding predicate: pure integer comparison in
+    // TransactionDescr::COIN (1e6) descr units. Both the loop early-exit gate
+    // and the final gate in processTransactionCreateA use it, so the two
+    // definitions cannot disagree. The predicate itself does no double
+    // conversion: callers pass the already-accumulated CAmount ledger
+    // (cinAmount). That ledger is summed from wallet doubles upstream, but
+    // the +1e-8 pad in xBridgeIntFromReal absorbs sub-descr-unit float dust
+    // (far below one descr unit), so integer-exact ties compare correctly.
+    // This replaces
+    // the former padded-double form (inAmount < xBridgeValueFromAmount(req)),
+    // whose unconditional +1e-8 pad deterministically rejected exact ties
+    // (10000 == 9800+100+100) with crNoMoney.
+    return inDescr >= requirementDescr;
 }
 
 bool xBridgeValidCoin(const std::string coin)

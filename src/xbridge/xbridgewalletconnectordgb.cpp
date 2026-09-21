@@ -30,7 +30,7 @@ bool createRawTransaction(const std::string & rpcuser,
                           const std::string & rpcip,
                           const std::string & rpcport,
                           const std::vector<XTxIn> & inputs,
-                          const std::vector<std::pair<std::string, double> > & outputs,
+                          const std::vector<std::pair<std::string, std::string> > & outputs,
                           const uint32_t lockTime,
                           std::string & tx,
                           bool cltv);
@@ -126,7 +126,7 @@ DgbWalletConnector::DgbWalletConnector()
 //******************************************************************************
 //******************************************************************************
 bool DgbWalletConnector::createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                                  const std::vector<std::pair<std::string, std::string> > & outputs,
                                                   std::string & txId,
                                                   uint32_t & txVout,
                                                   std::string & rawTx)

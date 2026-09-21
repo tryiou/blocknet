@@ -929,14 +929,14 @@ bool getNewAddress(const std::string & rpcuser,
 //*****************************************************************************
 //*****************************************************************************
 bool createRawTransaction(const std::string & rpcuser,
-                          const std::string & rpcpasswd,
-                          const std::string & rpcip,
-                          const std::string & rpcport,
-                          const std::vector<XTxIn> & inputs,
-                          const std::vector<std::pair<std::string, double> > & outputs,
-                          const uint32_t lockTime,
-                          std::string & tx,
-                          const bool cltv=false)
+                           const std::string & rpcpasswd,
+                           const std::string & rpcip,
+                           const std::string & rpcport,
+                           const std::vector<XTxIn> & inputs,
+                           const std::vector<std::pair<std::string, std::string> > & outputs,
+                           const uint32_t lockTime,
+                           std::string & tx,
+                           const bool cltv=false)
 {
     try
     {
@@ -954,11 +954,20 @@ bool createRawTransaction(const std::string & rpcuser,
             i.push_back(tmp);
         }
 
-        // outputs
+        // outputs: exact decimal strings (see xBridgeAmountToString). Doubles
+        // must never reach this call: UniValue serializes them with
+        // setprecision(16), which can exceed the wallet's 8 decimals and is
+        // rejected with code -3 "Invalid amount".
         UniValue o(UniValue::VOBJ);
-        for (const std::pair<std::string, double> & dest : outputs)
+        for (const std::pair<std::string, std::string> & dest : outputs)
         {
-            o.pushKV(dest.first, dest.second);
+            UniValue amount(UniValue::VNUM);
+            if (!amount.setNumStr(dest.second))
+            {
+                LOG() << "invalid output amount <" << dest.second << "> for <" << dest.first << ">";
+                return false;
+            }
+            o.pushKV(dest.first, amount);
         }
 
         UniValue params(UniValue::VARR);
@@ -2375,10 +2384,10 @@ bool BtcWalletConnector<CryptoProvider>::createDepositUnlockScript(const std::ve
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                                                  const std::vector<std::pair<std::string, double> > & outputs,
-                                                                  std::string & txId,
-                                                                  uint32_t & txVout,
-                                                                  std::string & rawTx)
+                                                                   const std::vector<std::pair<std::string, std::string> > & outputs,
+                                                                   std::string & txId,
+                                                                   uint32_t & txVout,
+                                                                   std::string & rawTx)
 {
     if (!rpc::createRawTransaction(m_user, m_passwd, m_ip, m_port,
                                    inputs, outputs, 0, rawTx, true))
@@ -2428,7 +2437,7 @@ xbridge::CTransactionPtr createTransaction(const bool txWithTimeField)
 //******************************************************************************
 xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
                                            const std::vector<XTxIn> & inputs,
-                                           const std::vector<std::pair<std::string, double> >  & outputs,
+                                           const std::vector<std::pair<std::string, CAmount> >  & outputs,
                                            const uint64_t COIN,
                                            const uint32_t txversion,
                                            const uint32_t lockTime,
@@ -2443,14 +2452,14 @@ xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
         tx->vin.push_back(CTxIn(COutPoint(uint256S(in.txid), in.n)));
     }
 
-    for (const std::pair<std::string, double> & out : outputs)
+    for (const std::pair<std::string, CAmount> & out : outputs)
     {
         std::vector<unsigned char> id = conn.toXAddr(out.first);
 
         CScript scr;
         scr << OP_DUP << OP_HASH160 << ToByteVector(id) << OP_EQUALVERIFY << OP_CHECKSIG;
 
-        tx->vout.push_back(CTxOut(out.second * COIN, scr));
+        tx->vout.push_back(CTxOut(out.second, scr));
     }
 
     return tx;
@@ -2460,7 +2469,7 @@ xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                                                 const std::vector<std::pair<std::string, double> > & outputs,
+                                                                 const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                                  const std::vector<unsigned char> & mpubKey,
                                                                  const std::vector<unsigned char> & mprivKey,
                                                                  const std::vector<unsigned char> & innerScript,
@@ -2532,7 +2541,7 @@ bool BtcWalletConnector<CryptoProvider>::createRefundTransaction(const std::vect
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                                                  const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                                   const std::vector<unsigned char> & mpubKey,
                                                                   const std::vector<unsigned char> & mprivKey,
                                                                   const std::vector<unsigned char> & xpubKey,
@@ -2596,7 +2605,7 @@ bool BtcWalletConnector<CryptoProvider>::createPaymentTransaction(const std::vec
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createPartialTransaction(const std::vector<XTxIn> inputs,
-                                                                  const std::vector<std::pair<std::string, double> > outputs,
+                                                                  const std::vector<std::pair<std::string, CAmount> > outputs,
                                                                   std::string & txId, std::string & rawTx)
 {
     xbridge::CTransactionPtr tx = createTransaction(*this, inputs, outputs, COIN, txVersion, 0, txWithTimeField);
@@ -2692,7 +2701,7 @@ bool BtcWalletConnector<CryptoProvider>::splitUtxos(const CAmount splitAmount, c
     std::vector<xbridge::XTxIn> vins;
     for (const auto & vin : unspent) {
         vinsTotal += vin.camount();
-        vins.emplace_back(vin.txId, vin.vout, vin.amount);
+        vins.emplace_back(vin.txId, vin.vout, xBridgeWalletSatsFromReal(vin.amount, COIN));
     }
 
     auto outputCount = static_cast<int>(vinsTotal / splitSize);
@@ -2742,9 +2751,9 @@ bool BtcWalletConnector<CryptoProvider>::splitUtxos(const CAmount splitAmount, c
         return false;
     }
 
-    std::vector<std::pair<std::string, double>> dvouts;
+    std::vector<std::pair<std::string, CAmount>> dvouts;
     for (auto & vout : vouts)
-        dvouts.emplace_back(vout.first, xBridgeValueFromAmount(vout.second));
+        dvouts.emplace_back(vout.first, xBridgeDescrToSats(vout.second, COIN));
     xbridge::CTransactionPtr tx = createTransaction(*this, vins, dvouts, COIN, txVersion, 0, txWithTimeField);
     rawTx = tx->toString();
 

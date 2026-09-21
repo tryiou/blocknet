@@ -1959,7 +1959,6 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
         return true;
     }
 
-    const double outAmount = xBridgeValueFromAmount(xtx->fromAmount);
     const CAmount coutAmount = xtx->fromAmount;
 
     double inAmount = 0;
@@ -1971,7 +1970,9 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
     std::vector<wallet::UtxoEntry> usedInTx;
     for (auto it = xtx->usedCoins.begin(); it != xtx->usedCoins.end(); ) {
         // if we have enough utxos, skip
-        if (inAmount >= xBridgeValueFromAmount(coutAmountPlusFees)) {
+        // (non-empty guard: with nothing consumed yet the requirement is
+        // still zero-initialized and an integer 0>=0 would exit immediately)
+        if (!usedInTx.empty() && xBridgeFundsSufficient(cinAmount, coutAmountPlusFees)) {
             if (!xtx->isPartialOrderAllowed())
                 break; // if not partial order, done
             // If this is a partial order store unused utxos for eventual repost
@@ -1991,16 +1992,13 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
         ++it;
     }
 
-    const double fee1 = xBridgeValueFromAmount(cfee1);
-    const double fee2 = xBridgeValueFromAmount(cfee2);
-
     {
         UniValue log_obj(UniValue::VOBJ);
         log_obj.pushKV("orderid", txid.GetHex());
-        log_obj.pushKV("fee1", xBridgeValueFromAmount(cfee1));
-        log_obj.pushKV("fee2", xBridgeValueFromAmount(cfee2));
-        log_obj.pushKV("in_amount", inAmount);
-        log_obj.pushKV("out_amount", xBridgeValueFromAmount(coutAmountPlusFees));
+        log_obj.pushKV("fee1", xBridgeAmountToString(cfee1));
+        log_obj.pushKV("fee2", xBridgeAmountToString(cfee2));
+        log_obj.pushKV("in_amount", xBridgeAmountToString(cinAmount));
+        log_obj.pushKV("out_amount", xBridgeAmountToString(coutAmountPlusFees));
         UniValue log_utxos(UniValue::VARR);
         for (const auto & entry : usedInTx) {
             UniValue log_utxo(UniValue::VOBJ);
@@ -2013,14 +2011,15 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
         LogOrderMsg(log_obj, "utxo and fees for order", __FUNCTION__);
     }
 
-    // check amount
-    if (inAmount < xBridgeValueFromAmount(coutAmountPlusFees))
+    // check amount (canonical integer predicate, same definition as the
+    // loop gate above; empty selection can never fund)
+    if (usedInTx.empty() || !xBridgeFundsSufficient(cinAmount, coutAmountPlusFees))
     {
         // no money, cancel transaction
         UniValue log_obj(UniValue::VOBJ);
         log_obj.pushKV("orderid", txid.GetHex());
-        log_obj.pushKV("in_amount", inAmount);
-        log_obj.pushKV("out_amount", xBridgeValueFromAmount(coutAmountPlusFees));
+        log_obj.pushKV("in_amount", xBridgeAmountToString(cinAmount));
+        log_obj.pushKV("out_amount", xBridgeAmountToString(coutAmountPlusFees));
         LogOrderMsg(log_obj, "insufficient funds for order: expecting in amount to be >= out amount, canceling", __FUNCTION__);
         sendCancelTransaction(xtx, crNoMoney);
         return true;
@@ -2072,29 +2071,34 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
 
     // depositTx
     {
-        std::vector<xbridge::XTxIn>                  inputs;
-        std::vector<std::pair<std::string, double> > outputs;
+        std::vector<xbridge::XTxIn>                               inputs;
+        std::vector<std::pair<std::string, std::string> >         outputs;
 
-        // inputs
+        // inputs (amounts unused by the createrawtransaction RPC path, which
+        // serializes txid/vout only; converted to sats for type correctness)
         wallet::UtxoEntry largestUtxo;
         for (const wallet::UtxoEntry & entry : usedInTx)
         {
             if (entry.amount > largestUtxo.amount)
                 largestUtxo = entry;
-            inputs.emplace_back(entry.txId, entry.vout, entry.amount);
+            inputs.emplace_back(entry.txId, entry.vout, xBridgeWalletSatsFromReal(entry.amount, connFrom->COIN));
         }
 
-        // outputs
-
-        // amount
-        outputs.push_back(std::make_pair(xtx->lockP2SHAddress, outAmount+fee2));
+        // outputs: integer descr bookkeeping; exact decimal strings to the
+        // wallet (doubles must never reach createrawtransaction)
+        const CAmount depositDescr = coutAmount + cfee2;
+        outputs.push_back(std::make_pair(xtx->lockP2SHAddress,
+                                         xBridgeAmountToString(depositDescr)));
 
         // rest
-        if (inAmount > outAmount+fee1+fee2)
+        const CAmount restDescr = cinAmount - coutAmountPlusFees;
+        if (restDescr > 0)
         {
-            double rest = inAmount-outAmount-fee1-fee2;
+            // dust comparison only (no serialization): exact unpadded double
+            const double rest = static_cast<double>(restDescr) / TransactionDescr::COIN;
             if (!connFrom->isDustAmount(rest)) {
-                outputs.push_back(std::make_pair(largestUtxo.address, rest)); // change back to largest input used in order
+                outputs.push_back(std::make_pair(largestUtxo.address,
+                                                 xBridgeAmountToString(restDescr))); // change back to largest input used in order
                 hasChange = true;
                 changeAddr = largestUtxo.address;
             }
@@ -2123,11 +2127,13 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
 
     // refundTx
     {
-        std::vector<xbridge::XTxIn>                  inputs;
-        std::vector<std::pair<std::string, double> > outputs;
+        std::vector<xbridge::XTxIn>                   inputs;
+        std::vector<std::pair<std::string, CAmount> > outputs;
 
-        // inputs from binTx
-        inputs.emplace_back(xtx->binTxId, xtx->binTxVout, outAmount+fee2);
+        // inputs from binTx: exact deposit sats (integer descr -> wallet
+        // units, no double involved)
+        const CAmount refundDepositSats = xBridgeDescrToSats(coutAmount + cfee2, connFrom->COIN);
+        inputs.emplace_back(xtx->binTxId, xtx->binTxVout, refundDepositSats);
 
         // outputs
         {
@@ -2142,7 +2148,7 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
                 }
             }
 
-            outputs.push_back(std::make_pair(addr, outAmount));
+            outputs.push_back(std::make_pair(addr, xBridgeDescrToSats(coutAmount, connFrom->COIN)));
         }
 
         if (!connFrom->createRefundTransaction(inputs, outputs,
@@ -2237,7 +2243,7 @@ bool Session::Impl::processTransactionCreateA(XBridgePacketPtr packet) const
     if (xtx->isPartialRepost()) {
         CAmount repostAmount = 0; // use everything that is available (from remaining confirmed utxos)
         if(hasChange && xtx->isRepostChangeAllowed()) {
-            auto spent = xBridgeAmountFromReal(outAmount + fee2);
+            const CAmount spent = coutAmount + cfee2;
             if (xtx->origFromAmount > spent) {
                 repostAmount = xtx->origFromAmount - spent;
             }
@@ -2452,7 +2458,6 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
         return true;
     }
 
-    double outAmount = static_cast<double>(xtx->fromAmount) / TransactionDescr::COIN;
     double checkAmount = static_cast<double>(xtx->toAmount) / TransactionDescr::COIN;
 
     // check preliminary lock times for counterparty
@@ -2510,31 +2515,37 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
         LogOrderMsg(txid.GetHex(), "counterparty deposit confirmed for order", __FUNCTION__);
     }
 
-    double fee1      = 0;
-    double fee2      = connFrom->minTxFee2(1, 1);
     double inAmount  = 0;
+    CAmount cfee1{0};
+    const CAmount cfee2 = xBridgeIntFromReal(connFrom->minTxFee2(1, 1));
+    CAmount cinAmount = xBridgeIntFromReal(inAmount);
+    const CAmount ccoutAmount = xtx->fromAmount;
+    CAmount ccoutAmountPlusFees{0};
 
     std::vector<wallet::UtxoEntry> usedInTx;
     for (const wallet::UtxoEntry & entry : xtx->usedCoins)
     {
-        usedInTx.push_back(entry);
-        inAmount += entry.amount;
-        fee1 = connFrom->minTxFee1(usedInTx.size(), 3);
-
-        // check amount
-        if (inAmount >= outAmount+fee1+fee2)
+        // canonical integer gate, same definition as the maker-side gate (non-empty
+        // guard: with nothing consumed yet the requirement is still
+        // zero-initialized and an integer 0>=0 would exit immediately)
+        if (!usedInTx.empty() && xBridgeFundsSufficient(cinAmount, ccoutAmountPlusFees))
         {
             break;
         }
+        usedInTx.push_back(entry);
+        inAmount += entry.amount;
+        cinAmount = xBridgeIntFromReal(inAmount);
+        cfee1 = xBridgeIntFromReal(connFrom->minTxFee1(usedInTx.size(), 3));
+        ccoutAmountPlusFees = ccoutAmount+cfee1+cfee2;
     }
 
     {
         UniValue log_obj(UniValue::VOBJ);
         log_obj.pushKV("orderid", txid.GetHex());
-        log_obj.pushKV("fee1", fee1);
-        log_obj.pushKV("fee2", fee2);
-        log_obj.pushKV("in_amount", inAmount);
-        log_obj.pushKV("out_amount", outAmount + fee1 + fee2);
+        log_obj.pushKV("fee1", xBridgeAmountToString(cfee1));
+        log_obj.pushKV("fee2", xBridgeAmountToString(cfee2));
+        log_obj.pushKV("in_amount", xBridgeAmountToString(cinAmount));
+        log_obj.pushKV("out_amount", xBridgeAmountToString(ccoutAmountPlusFees));
         UniValue log_utxos(UniValue::VARR);
         for (const auto & entry : usedInTx) {
             UniValue log_utxo(UniValue::VOBJ);
@@ -2547,14 +2558,15 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
         LogOrderMsg(log_obj, "utxo and fees for order", __FUNCTION__);
     }
 
-    // check amount
-    if (inAmount < outAmount+fee1+fee2)
+    // check amount (canonical integer predicate, same definition as the loop
+    // gate above; empty selection can never fund)
+    if (usedInTx.empty() || !xBridgeFundsSufficient(cinAmount, ccoutAmountPlusFees))
     {
         // no money, cancel transaction
         UniValue log_obj(UniValue::VOBJ);
         log_obj.pushKV("orderid", txid.GetHex());
-        log_obj.pushKV("in_amount", inAmount);
-        log_obj.pushKV("out_amount", outAmount+fee1+fee2);
+        log_obj.pushKV("in_amount", xBridgeAmountToString(cinAmount));
+        log_obj.pushKV("out_amount", xBridgeAmountToString(ccoutAmountPlusFees));
         LogOrderMsg(log_obj, "insufficient funds for order: expecting in amount to be >= out amount, canceling", __FUNCTION__);
         sendCancelTransaction(xtx, crNoMoney);
         return true;
@@ -2593,29 +2605,34 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
 
     // depositTx
     {
-        std::vector<xbridge::XTxIn>                  inputs;
-        std::vector<std::pair<std::string, double> > outputs;
+        std::vector<xbridge::XTxIn>                               inputs;
+        std::vector<std::pair<std::string, std::string> >         outputs;
 
-        // inputs
+        // inputs (amounts unused by the createrawtransaction RPC path, which
+        // serializes txid/vout only; converted to sats for type correctness)
         wallet::UtxoEntry largestUtxo;
         for (const wallet::UtxoEntry & entry : usedInTx)
         {
             if (entry.amount > largestUtxo.amount)
                 largestUtxo = entry;
-            inputs.emplace_back(entry.txId, entry.vout, entry.amount);
+            inputs.emplace_back(entry.txId, entry.vout, xBridgeWalletSatsFromReal(entry.amount, connFrom->COIN));
         }
 
-        // outputs
-
-        // amount
-        outputs.push_back(std::make_pair(xtx->lockP2SHAddress, outAmount+fee2));
+        // outputs: integer descr bookkeeping; exact decimal strings to the
+        // wallet (doubles must never reach createrawtransaction)
+        const CAmount depositDescr = ccoutAmount + cfee2;
+        outputs.push_back(std::make_pair(xtx->lockP2SHAddress,
+                                         xBridgeAmountToString(depositDescr)));
 
         // rest
-        if (inAmount > outAmount+fee1+fee2)
+        const CAmount restDescr = cinAmount - ccoutAmountPlusFees;
+        if (restDescr > 0)
         {
-            double rest = inAmount-outAmount-fee1-fee2;
+            // dust comparison only (no serialization): exact unpadded double
+            const double rest = static_cast<double>(restDescr) / TransactionDescr::COIN;
             if (!connFrom->isDustAmount(rest))
-                outputs.push_back(std::make_pair(largestUtxo.address, rest)); // change back to largest input used in order
+                outputs.push_back(std::make_pair(largestUtxo.address,
+                                                 xBridgeAmountToString(restDescr))); // change back to largest input used in order
         }
 
         if (!connFrom->createDepositTransaction(inputs, outputs, xtx->binTxId, xtx->binTxVout, xtx->binTx))
@@ -2641,11 +2658,13 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
 
     // refundTx
     {
-        std::vector<xbridge::XTxIn>                  inputs;
-        std::vector<std::pair<std::string, double> > outputs;
+        std::vector<xbridge::XTxIn>                   inputs;
+        std::vector<std::pair<std::string, CAmount> > outputs;
 
-        // inputs from binTx
-        inputs.emplace_back(xtx->binTxId, xtx->binTxVout, outAmount+fee2);
+        // inputs from binTx: exact deposit sats (integer descr -> wallet
+        // units, no double involved)
+        const CAmount refundDepositSats = xBridgeDescrToSats(ccoutAmount + cfee2, connFrom->COIN);
+        inputs.emplace_back(xtx->binTxId, xtx->binTxVout, refundDepositSats);
 
         // outputs
         {
@@ -2659,7 +2678,7 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
                 }
             }
 
-            outputs.push_back(std::make_pair(addr, outAmount));
+            outputs.push_back(std::make_pair(addr, xBridgeDescrToSats(ccoutAmount, connFrom->COIN)));
         }
 
         if (!connFrom->createRefundTransaction(inputs, outputs,
@@ -3955,16 +3974,27 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
     auto fromAddr = connFrom->fromXAddr(xtx->from);
     auto toAddr = connTo->fromXAddr(xtx->to);
 
-    double outAmount   = static_cast<double>(xtx->toAmount)/TransactionDescr::COIN;
-    std::vector<xbridge::XTxIn>                  inputs;
-    std::vector<std::pair<std::string, double> > outputs;
+    // Exact integer payment: counterparty P2SH amount is already exact
+    // on-chain sats (oBinTxP2SHAmount); the redeem output mirrors the
+    // checkDepositTransaction excess rule (pay the excess only when the
+    // deposit strictly covers amount + redeem fee), computed in integers.
+    // oOverpayment (legacy double) is not used for construction.
+    const CAmount toSats = xBridgeDescrToSats(xtx->toAmount, connTo->COIN);
+    const CAmount fee2sats = xBridgeWalletSatsFromReal(connTo->minTxFee2(1, 1), connTo->COIN);
+    const uint64_t p2shSats = xtx->oBinTxP2SHAmount;
+    const CAmount excessSats =
+        (p2shSats > static_cast<uint64_t>(toSats + fee2sats))
+            ? static_cast<CAmount>(p2shSats) - toSats - fee2sats
+            : 0;
+    std::vector<xbridge::XTxIn>                   inputs;
+    std::vector<std::pair<std::string, CAmount> > outputs;
 
     // inputs from binTx
-    inputs.emplace_back(xtx->oBinTxId, xtx->oBinTxVout, static_cast<double>(xtx->oBinTxP2SHAmount)/static_cast<double>(connTo->COIN));
+    inputs.emplace_back(xtx->oBinTxId, xtx->oBinTxVout, static_cast<CAmount>(p2shSats));
 
     // outputs
     {
-        outputs.emplace_back(toAddr, outAmount + xtx->oOverpayment);
+        outputs.emplace_back(toAddr, toSats + excessSats);
     }
 
     if (!connTo->createPaymentTransaction(inputs, outputs,
@@ -3972,7 +4002,7 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
                                           xtx->secret(), xtx->unlockScript,
                                           xtx->payTxId, xtx->payTx))
     {
-        LogOrderMsg(xtx->id.GetHex(), "failed to create payment redeem transaction, retrying", __FUNCTION__);
+        LogOrderMsg(xtx->id.GetHex(), "failed to create payment redeem transaction", __FUNCTION__);
         if (!xtx->didLogPayTx2()) {
             TXLOG() << "redeem counterparty deposit for order " << xtx->id.ToString() << " (submit manually using sendrawtransaction) "
                     << xtx->fromCurrency << "(" << xbridge::xBridgeStringValueFromAmount(xtx->fromAmount) << " - " << fromAddr << ") / "
