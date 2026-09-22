@@ -8,10 +8,9 @@ deferral.
 
 ## XRouter TLS certificate verification is disabled
 
-`src/xrouter/utils-network.cpp` (XR client call path) currently uses
-`SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, nullptr)` — certificate
-verification of remote XRouter/SSL peers is disabled, and enabling
-`SSL_VERIFY_PEER` is commented out in the source with a TODO.
+`src/xrouter/utils-network.cpp` (XR client call path) does not verify
+remote XRouter/SSL peer certificates: enabling `SSL_VERIFY_PEER` is
+commented out in the source with a TODO ("xrclient cert verification").
 
 Accepted for now because enabling it changes connection behavior for
 nodes that point at peers with invalid or self-signed certificates.
