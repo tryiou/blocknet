@@ -164,6 +164,10 @@ struct TestChainPoS : public TestingSetup {
 
     void ReloadWallet() {
         if (wallet) {
+            // Drain any queued or in-flight background validation callbacks
+            // before the wallet is destroyed, otherwise the scheduler thread
+            // may still be executing a callback for a freed wallet.
+            SyncWithValidationInterfaceQueue();
             UnregisterValidationInterface(wallet.get());
             RemoveWallet(wallet);
             wallet.reset();
@@ -276,6 +280,11 @@ struct TestChainPoS : public TestingSetup {
     }
 
     ~TestChainPoS() {
+        // Drain any queued or in-flight background validation callbacks before
+        // tearing down the txindex, wallet, and governance db. The scheduler
+        // thread is still running until the TestingSetup base destructor runs,
+        // so without this it can execute callbacks for freed objects.
+        SyncWithValidationInterfaceQueue();
         if (g_txindex) {
             g_txindex->Stop();
             g_txindex.reset();

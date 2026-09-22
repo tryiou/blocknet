@@ -20,7 +20,7 @@ Dependencies
 
 See [dependencies.md](dependencies.md) for a complete overview.
 
-If you want to build the disk image with `make deploy` (.dmg / optional), you need RSVG:
+If you want to build the distributable app package with `make deploy` (.zip / optional), you need RSVG:
 
     brew install librsvg
 
@@ -38,17 +38,17 @@ from the root of the repository.
 
 **Note**: You only need Berkeley DB if the wallet is enabled (see [*Disable-wallet mode*](/doc/build-osx.md#disable-wallet-mode)).
 
-Build Bitcoin Core
+Build Blocknet Core
 ------------------------
 
-1. Clone the Bitcoin Core source code:
+1. Clone the Blocknet Core source code:
 
-        git clone https://github.com/bitcoin/bitcoin
-        cd bitcoin
+        git clone https://github.com/blocknetdx/blocknet
+        cd blocknet
 
-2.  Build Bitcoin Core:
+2.  Build Blocknet Core:
 
-    Configure and build the headless Bitcoin Core binaries as well as the GUI (if Qt is found).
+    Configure and build the headless Blocknet Core binaries as well as the GUI (if Qt is found).
 
     You can disable the GUI build by passing `--without-gui` to configure.
 
@@ -60,13 +60,13 @@ Build Bitcoin Core
 
         make check
 
-4.  You can also create a .dmg that contains the .app bundle (optional):
+4.  You can also package the .app bundle as a .zip (optional):
 
         make deploy
 
 Disable-wallet mode
 --------------------
-When the intention is to run only a P2P node without a wallet, Bitcoin Core may be compiled in
+When the intention is run only a P2P node without a wallet, Blocknet Core may be compiled in
 disable-wallet mode with:
 
     ./configure --disable-wallet
@@ -78,99 +78,83 @@ Mining is also possible in disable-wallet mode using the `getblocktemplate` RPC 
 Running
 -------
 
-Bitcoin Core is now available at `./src/bitcoind`
+Blocknet Core is now available at `./src/blocknetd`
 
 Before running, you may create an empty configuration file:
 
-    mkdir -p "/Users/${USER}/Library/Application Support/Bitcoin"
+    mkdir -p "/Users/${USER}/Library/Application Support/Blocknet"
 
-    touch "/Users/${USER}/Library/Application Support/Bitcoin/bitcoin.conf"
+    touch "/Users/${USER}/Library/Application Support/Blocknet/blocknet.conf"
 
-    chmod 600 "/Users/${USER}/Library/Application Support/Bitcoin/bitcoin.conf"
+    chmod 600 "/Users/${USER}/Library/Application Support/Blocknet/blocknet.conf"
 
-The first time you run bitcoind, it will start downloading the blockchain. This process could take many hours, or even days on slower than average systems.
+The first time you run blocknetd, it will start downloading the blockchain. This process could take many hours, or even days on slower than average systems.
 
 You can monitor the download process by looking at the debug.log file:
 
-    tail -f $HOME/Library/Application\ Support/Bitcoin/debug.log
+    tail -f $HOME/Library/Application\ Support/Blocknet/debug.log
 
 Other commands:
 -------
 
-    ./src/bitcoind -daemon # Starts the bitcoin daemon.
-    ./src/bitcoin-cli --help # Outputs a list of command-line options.
-    ./src/bitcoin-cli help # Outputs a list of RPC commands when the daemon is running.
+    ./src/blocknetd -daemon # Starts the blocknetd daemon.
+    ./src/blocknet-cli --help # Outputs a list of command-line options.
+    ./src/blocknet-cli help # Outputs a list of RPC commands when the daemon is running.
 
 Notes
 -----
 
-* Tested on OS X 10.10 Yosemite through macOS 10.13 High Sierra on 64-bit Intel processors only.
+* Tested on macOS 14+ (x86_64 and arm64). Minimum deployment target 14.0 (see `depends/hosts/darwin.mk`).
 
-* Building with downloaded Qt binaries is not officially supported. See the notes in [#7714](https://github.com/bitcoin/bitcoin/issues/7714)
+* Building with downloaded Qt binaries is not officially supported.
 
 Deterministic macOS DMG Notes
 -----------------------------
 
-Working macOS DMGs are created in Linux by combining a recent clang,
-the Apple binutils (ld, ar, etc) and DMG authoring tools.
+Working macOS DMGs are created in Linux by combining a recent clang/LLVM,
+the LLD Mach-O linker (driven through a `${HOST}-ld` → `ld64.lld` PATH shim
+created by the Guix build scripts, `-mlinker-version=711`) and DMG authoring
+tools. See `depends/hosts/darwin.mk`:
+`OSX_MIN_VERSION=14.0`, `OSX_SDK_VERSION=14.0`, `XCODE_VERSION=26.1.1`.
 
 Apple uses clang extensively for development and has upstreamed the necessary
 functionality so that a vanilla clang can take advantage. It supports the use
 of -F, -target, -mmacosx-version-min, and --sysroot, which are all necessary
 when building for macOS.
 
-Apple's version of binutils (called cctools) contains lots of functionality
-missing in the FSF's binutils. In addition to extra linker options for
-frameworks and sysroots, several other tools are needed as well such as
-install_name_tool, lipo, and nmedit. These do not build under linux, so they
-have been patched to do so. The work here was used as a starting point:
-[mingwandroid/toolchain4](https://github.com/mingwandroid/toolchain4).
-
-In order to build a working toolchain, the following source packages are needed
-from Apple: cctools, dyld, and ld64.
-
 These tools inject timestamps by default, which produce non-deterministic
 binaries. The ZERO_AR_DATE environment variable is used to disable that.
 
-This version of cctools has been patched to use the current version of clang's
-headers and its libLTO.so rather than those from llvmgcc, as it was
-originally done in toolchain4.
+All builds must target an Apple SDK. The pinned SDK tarball URL and its
+SHA256 are set in `contrib/guix/macos-sdk.env` (hash-verified on fetch):
 
-To complicate things further, all builds must target an Apple SDK. These SDKs
-are free to download, but not redistributable.
-To obtain it, register for a developer account, then download the [Xcode 7.3.1 dmg](https://developer.apple.com/devcenter/download.action?path=/Developer_Tools/Xcode_7.3.1/Xcode_7.3.1.dmg).
-
-This file is several gigabytes in size, but only a single directory inside is
-needed:
 ```
-Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk
+source contrib/guix/macos-sdk.env
+mkdir -p depends/SDKs
+curl --location --fail "$MACOS_SDK_URL/$MACOS_SDK_NAME.tar" -o /tmp/macos-sdk.tar
+printf '%s %s\n' "$MACOS_SDK_SHA256" /tmp/macos-sdk.tar | sha256sum --check
+tar -C depends/SDKs -xf /tmp/macos-sdk.tar
 ```
 
-Unfortunately, the usual linux tools (7zip, hpmount, loopback mount) are incapable of opening this file.
-To create a tarball suitable for Gitian input, there are two options:
+which places it at:
 
-Using macOS, you can mount the dmg, and then create it with:
 ```
-  $ hdiutil attach Xcode_7.3.1.dmg
-  $ tar -C /Volumes/Xcode/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/ -czf MacOSX10.11.sdk.tar.gz MacOSX10.11.sdk
+depends/SDKs/Xcode-26.1.1-17B100-extracted-SDK-with-libcxx-headers
 ```
 
-Alternatively, you can use 7zip and SleuthKit to extract the files one by one.
-The script contrib/macdeploy/extract-osx-sdk.sh automates this. First ensure
-the dmg file is in the current directory, and then run the script. You may wish
-to delete the intermediate 5.hfs file and MacOSX10.11.sdk (the directory) when
-you've confirmed the extraction succeeded.
+Alternatively, with a Mac + developer account, download Xcode 26.1.1, extract
+the SDK (see `contrib/macdeploy/README.md#sdk-extraction`) and place it there
+(the exact name must match `depends/hosts/darwin.mk`, or set `SDK_PATH`).
 
-```bash
-apt-get install p7zip-full sleuthkit
-contrib/macdeploy/extract-osx-sdk.sh
-rm -rf 5.hfs MacOSX10.11.sdk
+On macOS, find your local SDK with `xcrun --show-sdk-path` and create the
+tarball with:
+
+```
+  $ tar -C $(dirname $(xcrun --show-sdk-path)) -czf <sdk-name>.tar.gz <sdk-name>
 ```
 
-The Gitian descriptors build 2 sets of files: Linux tools, then Apple binaries
-which are created using these tools. The build process has been designed to
-avoid including the SDK's files in Gitian's outputs. All interim tarballs are
-fully deterministic and may be freely redistributed.
+The Guix build (`contrib/guix/guix-build`) skips darwin hosts with a warning
+when no SDK is present; provide one to enable FULL macOS builds.
 
 genisoimage is used to create the initial DMG. It is not deterministic as-is,
 so it has been patched. A system genisoimage will work fine, but it will not
@@ -197,13 +181,13 @@ requirement in order to satisfy the new Gatekeeper requirements. Because this
 private key cannot be shared, we'll have to be a bit creative in order for the
 build process to remain somewhat deterministic. Here's how it works:
 
-- Builders use Gitian to create an unsigned release. This outputs an unsigned
-  dmg which users may choose to bless and run. It also outputs an unsigned app
-  structure in the form of a tarball, which also contains all of the tools
-  that have been previously (deterministically) built in order to create a
-  final dmg.
+- The Guix build produces an unsigned release: an unsigned dmg which users may
+  choose to bless and run, plus an unsigned app structure in the form of a
+  tarball, which also contains all of the tools that have been previously
+  (deterministically) built in order to create a final dmg.
 - The Apple keyholder uses this unsigned app to create a detached signature,
-  using the script that is also included there. Detached signatures are available from this [repository](https://github.com/bitcoin-core/bitcoin-detached-sigs).
-- Builders feed the unsigned app + detached signature back into Gitian. It
-  uses the pre-built tools to recombine the pieces into a deterministic dmg.
+  using the `contrib/macdeploy/detached-sig-create.sh` script that is also
+  included there.
+- The unsigned app + detached signature are recombined into a deterministic
+  dmg by the Guix codesign flow (`contrib/guix/libexec/codesign.sh`).
 

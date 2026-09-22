@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <consensus/tx_verify.h>
+#include <algorithm>
 
 #include <coinvalidator.h>
 #include <consensus/consensus.h>

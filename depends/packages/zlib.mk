@@ -1,8 +1,8 @@
 package=zlib
-$(package)_version=1.2.11
-$(package)_download_path=http://www.zlib.net
+$(package)_version=1.3.1
+$(package)_download_path=https://github.com/madler/zlib/releases/download/v$($(package)_version)
 $(package)_file_name=$(package)-$($(package)_version).tar.gz
-$(package)_sha256_hash=c3e5e9fdd5004dcb542feda5ee4f0ff0744628baf8ed2dd5d66f8ca1197cb1a1
+$(package)_sha256_hash=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
 
 define $(package)_set_vars
 $(package)_build_opts= CC="$($(package)_cc)"
@@ -10,7 +10,9 @@ $(package)_build_opts+=CFLAGS="$($(package)_cflags) $($(package)_cppflags) -fPIC
 $(package)_build_opts+=RANLIB="$($(package)_ranlib)"
 $(package)_build_opts+=AR="$($(package)_ar)"
 $(package)_build_opts_darwin+=AR="$($(package)_libtool)"
-$(package)_build_opts_darwin+=ARFLAGS="-o"
+# llvm-libtool-darwin (unlike Apple libtool, which defaults to -static for
+# .a output) requires an explicit operation flag.
+$(package)_build_opts_darwin+=ARFLAGS="-static -o"
 endef
 
 define $(package)_config_cmds

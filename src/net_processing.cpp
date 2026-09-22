@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <net_processing.h>
+#include <algorithm>
 
 #include <addrman.h>
 #include <banman.h>

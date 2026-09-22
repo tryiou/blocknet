@@ -9,6 +9,7 @@
 #include <QQueue>
 
 class ClientModel;
+class QPainterPath;
 
 QT_BEGIN_NAMESPACE
 class QPaintEvent;

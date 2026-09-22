@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <consensus/merkle.h>
+#include <algorithm>
 #include <merkleblock.h>
 #include <serialize.h>
 #include <streams.h>

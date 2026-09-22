@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <stakemgr.h>
+#include <algorithm>
 
 #include <governance/governance.h>
 #include <kernel.h>
@@ -218,12 +219,6 @@ int64_t StakeMgr::LastUpdateTime() const {
 
 int StakeMgr::LastBlockHeight() const {
     return lastBlockHeight;
-}
-
-const StakeMgr::StakeCoin & StakeMgr::GetStake() {
-    if (!stakeTimes.empty())
-        return *stakeTimes.begin()->second.begin();
-    return std::move(StakeCoin{});
 }
 
 bool StakeMgr::SuitableCoin(const COutput & coin, const int & tipHeight, const Consensus::Params & params) const {

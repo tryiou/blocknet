@@ -4,13 +4,15 @@ $(package)_download_path=https://github.com/theuni/libdmg-hfsplus/archive
 $(package)_file_name=libdmg-hfsplus-v$($(package)_version).tar.gz
 $(package)_sha256_hash=6569a02eb31c2827080d7d59001869ea14484c281efab0ae7f2b86af5c3120b3
 $(package)_build_subdir=build
+$(package)_patches=implicit-adc-include.patch
 
 define $(package)_preprocess_cmds
+  patch -p1 < $($(package)_patch_dir)/implicit-adc-include.patch && \
   mkdir build
 endef
 
 define $(package)_config_cmds
-  cmake -DCMAKE_INSTALL_PREFIX:PATH=$(build_prefix)/bin ..
+  PROFILE_BIN=`command -v gcc` && PROFILE_LIB=`dirname $$$${PROFILE_BIN}`/../lib && CFLAGS="$$$$CFLAGS -L$$$${PROFILE_LIB}" LDFLAGS="$$$$LDFLAGS -L$$$${PROFILE_LIB}" cmake -DCMAKE_INSTALL_PREFIX:PATH=$(build_prefix)/bin ..
 endef
 
 define $(package)_build_cmds

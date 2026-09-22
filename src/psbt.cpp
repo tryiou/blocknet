@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <psbt.h>
+#include <algorithm>
+#include <iterator>
 #include <util/strencodings.h>
 
 PartiallySignedTransaction::PartiallySignedTransaction(const CMutableTransaction& tx) : tx(tx)

@@ -7,6 +7,7 @@
 #define BITCOIN_NET_H
 
 #include <addrdb.h>
+#include <algorithm>
 #include <addrman.h>
 #include <amount.h>
 #include <bloom.h>

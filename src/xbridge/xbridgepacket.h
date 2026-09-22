@@ -9,10 +9,12 @@
 #define BLOCKNET_XBRIDGE_XBRIDGEPACKET_H
 
 #include <xbridge/util/logger.h>
+#include <algorithm>
 #include <xbridge/version.h>
 
 #include <vector>
 #include <deque>
+#include <iterator>
 #include <memory>
 #include <ctime>
 

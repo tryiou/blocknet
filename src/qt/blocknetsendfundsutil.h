@@ -6,6 +6,7 @@
 #define BLOCKNET_QT_BLOCKNETSENDFUNDSUTIL_H
 
 #include <qt/blocknetvars.h>
+#include <algorithm>
 
 #include <qt/bitcoinunits.h>
 #include <qt/guiutil.h>

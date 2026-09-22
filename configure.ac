@@ -6,7 +6,7 @@ define(_CLIENT_VERSION_REVISION, 1)
 define(_CLIENT_VERSION_BUILD, 0)
 define(_CLIENT_VERSION_RC, 0)
 define(_CLIENT_VERSION_IS_RELEASE, true)
-define(_COPYRIGHT_YEAR, 2023)
+define(_COPYRIGHT_YEAR, 2026)
 define(_COPYRIGHT_HOLDERS,[The %s developers])
 define(_COPYRIGHT_HOLDERS_SUBSTITUTION,[[Blocknet]])
 AC_INIT([Blocknet],m4_join([.], _CLIENT_VERSION_MAJOR, _CLIENT_VERSION_MINOR, _CLIENT_VERSION_REVISION, m4_if(_CLIENT_VERSION_BUILD, [0], [], _CLIENT_VERSION_BUILD))m4_if(_CLIENT_VERSION_RC, [0], [], [rc]_CLIENT_VERSION_RC),[https://github.com/blocknetdx/blocknet/issues],[blocknet],[https://blocknet.org/])
@@ -61,9 +61,19 @@ case $host in
   *mingw*)
      lt_cv_deplibs_check_method="pass_all"
   ;;
+  *darwin*)
+     dnl Because it prints a verbose warning, lld fails the following check
+     dnl for "-Wl,-single_module" from libtool.m4:
+     dnl   # If there is a non-empty error log, and "single_module"
+     dnl   # appears in it, assume the flag caused a linker warning
+     dnl "-single_module" works fine on ld64 and lld, so just bypass the test.
+     dnl Failure to set this to "yes" causes libtool to use a very broken
+     dnl link-line for shared libs.
+     lt_cv_apple_cc_single_mod="yes"
+  ;;
 esac
-dnl Require C++11 compiler (no GNU extensions)
-AX_CXX_COMPILE_STDCXX([11], [noext], [mandatory], [nodefault])
+dnl Require C++17 compiler (no GNU extensions)
+AX_CXX_COMPILE_STDCXX([17], [noext], [mandatory])
 dnl Check if -latomic is required for <std::atomic>
 CHECK_ATOMIC
 
@@ -85,8 +95,8 @@ AC_PATH_TOOL(RANLIB, ranlib)
 AC_PATH_TOOL(STRIP, strip)
 AC_PATH_TOOL(GCOV, gcov)
 AC_PATH_PROG(LCOV, lcov)
-dnl Python 3.4 is specified in .python-version and should be used if available, see doc/dependencies.md
-AC_PATH_PROGS([PYTHON], [python3.4 python3.5 python3.6 python3.7 python3 python])
+dnl Use the host's python3; no interpreter version is pinned.
+AC_PATH_PROGS([PYTHON], [python3 python])
 AC_PATH_PROG(GENHTML, genhtml)
 AC_PATH_PROG([GIT], [git])
 AC_PATH_PROG(CCACHE,ccache)
@@ -225,11 +235,6 @@ AC_ARG_ENABLE([zmq],
   [disable ZMQ notifications])],
   [use_zmq=$enableval],
   [use_zmq=yes])
-AC_ARG_ENABLE([bip70],
-  [AS_HELP_STRING([--disable-bip70],
-  [disable BIP70 (payment protocol) support in GUI (enabled by default)])],
-  [enable_bip70=$enableval],
-  [enable_bip70=auto])
 
 AC_ARG_WITH([protoc-bindir],[AS_HELP_STRING([--with-protoc-bindir=BIN_DIR],[specify protoc bin path])], [protoc_bin_path=$withval], [])
 
@@ -290,7 +295,6 @@ if test "x$enable_debug" = xyes; then
 
   AX_CHECK_PREPROC_FLAG([-DDEBUG],[[DEBUG_CPPFLAGS="$DEBUG_CPPFLAGS -DDEBUG"]],,[[$CXXFLAG_WERROR]])
   AX_CHECK_PREPROC_FLAG([-DDEBUG_LOCKORDER],[[DEBUG_CPPFLAGS="$DEBUG_CPPFLAGS -DDEBUG_LOCKORDER"]],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-ftrapv],[DEBUG_CXXFLAGS="$DEBUG_CXXFLAGS -ftrapv"],,[[$CXXFLAG_WERROR]])
 fi
 
 if test x$use_sanitizers != x; then
@@ -430,25 +434,25 @@ CPPFLAGS="$CPPFLAGS -DHAVE_BUILD_INFO -D__STDC_FORMAT_MACROS"
 
 AC_ARG_WITH([utils],
   [AS_HELP_STRING([--with-utils],
-  [build bitcoin-cli bitcoin-tx bitcoin-wallet (default=yes)])],
+  [build blocknet-cli blocknet-tx blocknet-wallet (default=yes)])],
   [build_bitcoin_utils=$withval],
   [build_bitcoin_utils=yes])
 
 AC_ARG_ENABLE([util-cli],
   [AS_HELP_STRING([--enable-util-cli],
-  [build bitcoin-cli])],
+  [build blocknet-cli])],
   [build_bitcoin_cli=$enableval],
   [build_bitcoin_cli=$build_bitcoin_utils])
 
 AC_ARG_ENABLE([util-tx],
   [AS_HELP_STRING([--enable-util-tx],
-  [build bitcoin-tx])],
+  [build blocknet-tx])],
   [build_bitcoin_tx=$enableval],
   [build_bitcoin_tx=$build_bitcoin_utils])
 
 AC_ARG_ENABLE([util-wallet],
   [AS_HELP_STRING([--enable-util-wallet],
-  [build bitcoin-wallet])],
+  [build blocknet-wallet])],
   [build_bitcoin_wallet=$enableval],
   [build_bitcoin_wallet=$build_bitcoin_utils])
 
@@ -460,7 +464,7 @@ AC_ARG_WITH([libs],
 
 AC_ARG_WITH([daemon],
   [AS_HELP_STRING([--with-daemon],
-  [build bitcoind daemon (default=yes)])],
+  [build blocknetd daemon (default=yes)])],
   [build_bitcoind=$withval],
   [build_bitcoind=yes])
 
@@ -472,7 +476,6 @@ case $host in
      use_pkgconfig=no
 
      TARGET_OS=windows
-     AC_CHECK_LIB([mingwthrd],      [main],, AC_MSG_ERROR(libmingwthrd missing))
      AC_CHECK_LIB([kernel32],      [main],, AC_MSG_ERROR(libkernel32 missing))
      AC_CHECK_LIB([user32],      [main],, AC_MSG_ERROR(libuser32 missing))
      AC_CHECK_LIB([gdi32],      [main],, AC_MSG_ERROR(libgdi32 missing))
@@ -491,6 +494,8 @@ case $host in
      AC_CHECK_LIB([shlwapi],      [main],, AC_MSG_ERROR(libshlwapi missing))
      AC_CHECK_LIB([iphlpapi],      [main],, AC_MSG_ERROR(libiphlpapi missing))
      AC_CHECK_LIB([crypt32],      [main],, AC_MSG_ERROR(libcrypt32 missing))
+     dnl bcrypt: Boost >= 1.73 unique_path() uses BCrypt* CNG APIs on Windows.
+     AC_CHECK_LIB([bcrypt],      [main],, AC_MSG_ERROR(libbcrypt missing))
 
      # -static is interpreted by libtool, where it has a different meaning.
      # In libtool-speak, it's -all-static.
@@ -511,11 +516,12 @@ case $host in
      if test "x$CXXFLAGS_overridden" = "xno"; then
        CXXFLAGS="$CXXFLAGS -w"
      fi
-     case $host in
-       i?86-*) WINDOWS_BITS=32 ;;
-       x86_64-*) WINDOWS_BITS=64 ;;
-       *) AC_MSG_ERROR("Could not determine win32/win64 for installer") ;;
-     esac
+      case $host in
+        i?86-*) WINDOWS_BITS=32 ;;
+        x86_64-*) WINDOWS_BITS=64 ;;
+        aarch64-*) WINDOWS_BITS=64 ;;
+        *) AC_MSG_ERROR("Could not determine win32/win64 for installer") ;;
+      esac
      AC_SUBST(WINDOWS_BITS)
 
      dnl libtool insists upon adding -nostdlib and a list of objects/libs to link against.
@@ -563,8 +569,11 @@ case $host in
            BUILD_OS=darwin
            ;;
          *)
-           AC_PATH_TOOL([INSTALLNAMETOOL], [install_name_tool], install_name_tool)
-           AC_PATH_TOOL([OTOOL], [otool], otool)
+            AC_PATH_TOOL([INSTALLNAMETOOL], [install_name_tool], install_name_tool)
+            AC_PATH_TOOL([OTOOL], [otool], otool)
+            dnl LLVM's objdump understands Mach-O (--macho --dylibs-used),
+            dnl used by macdeployqtplus (OBJDUMP env should point at it).
+            AC_PATH_TOOL([OBJDUMP], [objdump], objdump)
            AC_PATH_PROGS([GENISOIMAGE], [genisoimage mkisofs],genisoimage)
            AC_PATH_PROGS([RSVG_CONVERT], [rsvg-convert rsvg],rsvg-convert)
            AC_PATH_PROGS([IMAGEMAGICK_CONVERT], [convert],convert)
@@ -934,7 +943,7 @@ fi
 if test x$use_boost = xyes; then
 
 dnl Minimum required Boost version
-define(MINIMUM_REQUIRED_BOOST, 1.47.0)
+define(MINIMUM_REQUIRED_BOOST, 1.73.0)
 
 dnl Check for boost libs
 AX_BOOST_BASE([MINIMUM_REQUIRED_BOOST])
@@ -1110,9 +1119,6 @@ if test x$use_pkgconfig = xyes; then
     [
       PKG_CHECK_MODULES([SSL], [libssl],, [AC_MSG_ERROR(openssl not found.)])
       PKG_CHECK_MODULES([CRYPTO], [libcrypto],,[AC_MSG_ERROR(libcrypto not found.)])
-      if test x$enable_bip70 != xno; then
-        BITCOIN_QT_CHECK([PKG_CHECK_MODULES([PROTOBUF], [protobuf], [have_protobuf=yes], [have_protobuf=no])])
-      fi
       if test x$use_qr != xno; then
         BITCOIN_QT_CHECK([PKG_CHECK_MODULES([QR], [libqrencode], [have_qrencode=yes], [have_qrencode=no])])
       fi
@@ -1167,6 +1173,18 @@ else
   fi
 
   if test "x$use_zmq" = "xyes"; then
+     dnl We always link libzmq statically; zmq.h marks its symbols
+     dnl __declspec(dllimport) unless ZMQ_STATIC is defined, which makes
+     dnl strict linkers (lld) reject the probe even though the static lib
+     dnl is fine (GNU ld tolerates it, which is why this only bites on
+     dnl llvm-mingw). Define it for the probes below (and keep it for the
+     dnl build further down).
+     zmq_save_CPPFLAGS="$CPPFLAGS"
+     case $host in
+       *mingw*)
+         CPPFLAGS="$CPPFLAGS -DZMQ_STATIC"
+       ;;
+     esac
      AC_CHECK_HEADER([zmq.h],
        [AC_DEFINE([ENABLE_ZMQ],[1],[Define to 1 to enable ZMQ functions])],
        [AC_MSG_WARN([zmq.h not found, disabling zmq support])
@@ -1176,6 +1194,7 @@ else
        [AC_MSG_WARN([libzmq >= 4.0 not found, disabling zmq support])
         use_zmq=no
         AC_DEFINE([ENABLE_ZMQ],[0],[Define to 1 to enable ZMQ functions])])
+     CPPFLAGS="$zmq_save_CPPFLAGS"
   else
     AC_DEFINE_UNQUOTED([ENABLE_ZMQ],[0],[Define to 1 to enable ZMQ functions])
   fi
@@ -1189,9 +1208,6 @@ else
     esac
   fi
 
-  if test x$enable_bip70 != xno; then
-    BITCOIN_QT_CHECK(AC_CHECK_LIB([protobuf] ,[main],[PROTOBUF_LIBS=-lprotobuf], [have_protobuf=no]))
-  fi
   if test x$use_qr != xno; then
     BITCOIN_QT_CHECK([AC_CHECK_LIB([qrencode], [main],[QR_LIBS=-lqrencode], [have_qrencode=no])])
     BITCOIN_QT_CHECK([AC_CHECK_HEADER([qrencode.h],, have_qrencode=no)])
@@ -1270,24 +1286,19 @@ AC_SUBST(UNIVALUE_CFLAGS)
 AC_SUBST(UNIVALUE_LIBS)
 
 
-if test x$have_protobuf != xno &&
-   test x$enable_bip70 != xno; then
-  BITCOIN_QT_PATH_PROGS([PROTOC], [protoc],$protoc_bin_path)
-fi
-
-AC_MSG_CHECKING([whether to build bitcoind])
+AC_MSG_CHECKING([whether to build blocknetd])
 AM_CONDITIONAL([BUILD_BITCOIND], [test x$build_bitcoind = xyes])
 AC_MSG_RESULT($build_bitcoind)
 
-AC_MSG_CHECKING([whether to build bitcoin-cli])
+AC_MSG_CHECKING([whether to build blocknet-cli])
 AM_CONDITIONAL([BUILD_BITCOIN_CLI], [test x$build_bitcoin_cli = xyes])
 AC_MSG_RESULT($build_bitcoin_cli)
 
-AC_MSG_CHECKING([whether to build bitcoin-tx])
+AC_MSG_CHECKING([whether to build blocknet-tx])
 AM_CONDITIONAL([BUILD_BITCOIN_TX], [test x$build_bitcoin_tx = xyes])
 AC_MSG_RESULT($build_bitcoin_tx)
 
-AC_MSG_CHECKING([whether to build bitcoin-wallet])
+AC_MSG_CHECKING([whether to build blocknet-wallet])
 AM_CONDITIONAL([BUILD_BITCOIN_WALLET], [test x$build_bitcoin_wallet = xyes])
 AC_MSG_RESULT($build_bitcoin_wallet)
 
@@ -1388,7 +1399,7 @@ if test x$bitcoin_enable_qt != xno; then
     AC_MSG_WARN("xgettext is required to update qt translations")
   fi
 
-  AC_MSG_CHECKING([whether to build test_bitcoin-qt])
+  AC_MSG_CHECKING([whether to build test_blocknet-qt])
   if test x$use_gui_tests$bitcoin_enable_qt_test = xyesyes; then
     AC_MSG_RESULT([yes])
     BUILD_TEST_QT="yes"
@@ -1396,27 +1407,11 @@ if test x$bitcoin_enable_qt != xno; then
     AC_MSG_RESULT([no])
   fi
 
-  AC_MSG_CHECKING([whether to build BIP70 support])
-  if test x$have_protobuf = xno; then
-    if test x$enable_bip70 = xyes; then
-      AC_MSG_ERROR(protobuf missing)
-    fi
-    enable_bip70=no
-    AC_MSG_RESULT(no)
-  else
-    if test x$enable_bip70 != xno; then
-      AC_DEFINE([ENABLE_BIP70],[1],[Define if BIP70 support should be compiled in])
-      enable_bip70=yes
-      AC_MSG_RESULT([yes])
-    else
-      AC_MSG_RESULT([no])
-    fi
-  fi
 fi
 
 AM_CONDITIONAL([ENABLE_ZMQ], [test "x$use_zmq" = "xyes"])
 
-AC_MSG_CHECKING([whether to build test_bitcoin])
+AC_MSG_CHECKING([whether to build test_blocknet])
 if test x$use_tests = xyes; then
   AC_MSG_RESULT([yes])
   BUILD_TEST="yes"
@@ -1444,7 +1439,6 @@ AM_CONDITIONAL([ENABLE_TESTS],[test x$BUILD_TEST = xyes])
 AM_CONDITIONAL([ENABLE_FUZZ],[test x$enable_fuzz = xyes])
 AM_CONDITIONAL([ENABLE_QT],[test x$bitcoin_enable_qt = xyes])
 AM_CONDITIONAL([ENABLE_QT_TESTS],[test x$BUILD_TEST_QT = xyes])
-AM_CONDITIONAL([ENABLE_BIP70],[test x$enable_bip70 = xyes])
 AM_CONDITIONAL([ENABLE_BENCH],[test x$use_bench = xyes])
 AM_CONDITIONAL([USE_QRCODE], [test x$use_qr = xyes])
 AM_CONDITIONAL([USE_LCOV],[test x$use_lcov = xyes])
@@ -1455,7 +1449,6 @@ AM_CONDITIONAL([ENABLE_SSE41],[test x$enable_sse41 = xyes])
 AM_CONDITIONAL([ENABLE_AVX2],[test x$enable_avx2 = xyes])
 AM_CONDITIONAL([ENABLE_SHANI],[test x$enable_shani = xyes])
 AM_CONDITIONAL([USE_ASM],[test x$use_asm = xyes])
-AM_CONDITIONAL([USE_XROUTERCLIENT],[test x$use_xrouterclient = xyes])
 
 AC_DEFINE(CLIENT_VERSION_MAJOR, _CLIENT_VERSION_MAJOR, [Major version])
 AC_DEFINE(CLIENT_VERSION_MINOR, _CLIENT_VERSION_MINOR, [Minor version])
@@ -1515,7 +1508,6 @@ AC_SUBST(SSL_LIBS)
 AC_SUBST(EVENT_LIBS)
 AC_SUBST(EVENT_PTHREADS_LIBS)
 AC_SUBST(ZMQ_LIBS)
-AC_SUBST(PROTOBUF_LIBS)
 AC_SUBST(QR_LIBS)
 AC_CONFIG_FILES([Makefile src/Makefile doc/man/Makefile share/setup.nsi share/qt/Info.plist test/config.ini])
 AC_CONFIG_FILES([contrib/devtools/split-debug.sh],[chmod +x contrib/devtools/split-debug.sh])
@@ -1581,7 +1573,6 @@ echo "Options used to compile and link:"
 echo "  with wallet   = $enable_wallet"
 echo "  with gui / qt = $bitcoin_enable_qt"
 if test x$bitcoin_enable_qt != xno; then
-    echo "    with bip70  = $enable_bip70"
     echo "    with qr     = $use_qr"
 fi
 echo "  with zmq      = $use_zmq"

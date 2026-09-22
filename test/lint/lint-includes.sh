@@ -84,7 +84,6 @@ EXPECTED_BOOST_INCLUDES=(
     boost/asio/ssl.hpp
     boost/assign/list_of.hpp
     boost/bind.hpp
-    boost/config.hpp
     boost/cstdint.hpp
     boost/date_time/posix_time/conversion.hpp
     boost/date_time/posix_time/posix_time_types.hpp
@@ -93,17 +92,13 @@ EXPECTED_BOOST_INCLUDES=(
     boost/filesystem/operations.hpp
     boost/filesystem/path.hpp
     boost/foreach.hpp
-    boost/function.hpp
-    boost/io/ios_state.hpp
     boost/iostreams/concepts.hpp
     boost/iostreams/stream.hpp
     boost/lexical_cast.hpp
-    boost/locale.hpp
     boost/noncopyable.hpp
     boost/numeric/conversion/cast.hpp
     boost/pool/pool_alloc.hpp
     boost/preprocessor.hpp
-    boost/program_options.hpp
     boost/property_tree/ini_parser.hpp
     boost/property_tree/ptree.hpp
     boost/rational.hpp

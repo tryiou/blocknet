@@ -147,6 +147,12 @@ bool VerifyWallets(interfaces::Chain& chain, const std::vector<std::string>& wal
         } else if (!wallet_dir.is_absolute()) {
             return InitError(strprintf(_("Specified -walletdir \"%s\" is a relative path"), wallet_dir.string()));
         }
+        // The canonical path may preserve a trailing directory separator (e.g.
+        // "/dir/" stays "/dir/" depending on the boost::filesystem version).
+        // Strip it so the stored -walletdir value is stable and matches the
+        // canonical form of the directory without the separator.
+        while (canonical_wallet_dir.filename() == ".")
+            canonical_wallet_dir = canonical_wallet_dir.parent_path();
         gArgs.ForceSetArg("-walletdir", canonical_wallet_dir.string());
     }
 

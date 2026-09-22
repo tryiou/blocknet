@@ -6,6 +6,7 @@
 #define BLOCKNET_XBRIDGE_XBRIDGETRANSACTIONDESCR_H
 
 #include <xbridge/xbridgedef.h>
+#include <algorithm>
 #include <xbridge/xbridgepacket.h>
 #include <xbridge/xbridgewalletconnector.h>
 
@@ -60,7 +61,7 @@ struct TransactionDescr
         trInvalid
     };
 
-    static const int CURRENT_VERSION=1;
+    static const int CURRENT_VERSION=2;
     int nVersion{CURRENT_VERSION};
 
     ADD_SERIALIZE_METHODS;
@@ -69,6 +70,14 @@ struct TransactionDescr
     inline void SerializationOp(Stream & s, Operation ser_action) {
         LOCK(_lock);
         READWRITE(nVersion);
+        // Gate new trailing fields on the ON-DISK version (captured before
+        // the in-memory upgrade below): version 1 files lack those bytes.
+        const int diskVersion = ser_action.ForRead() ? nVersion : CURRENT_VERSION;
+        if (ser_action.ForRead() && nVersion < CURRENT_VERSION) {
+            // upgrade on load: in-memory objects are always current version,
+            // so re-saves persist new fields; unread fields default below.
+            nVersion = CURRENT_VERSION;
+        }
         READWRITE(id);
         READWRITE(role);
         READWRITE(hubAddress);
@@ -154,6 +163,19 @@ struct TransactionDescr
         READWRITE(logPayTx1);
         READWRITE(logPayTx2);
         READWRITE(parentOrder);
+        // NOTE: new persistent fields MUST be appended here at the end, never
+        // inserted mid-stream: SerializationOp is positional and backs
+        // orders.dat, so mid-stream inserts shift/desync previously persisted
+        // orders on upgrade.
+        // oRedeemTries joined in version 2, appended at the end so version 1
+        // files still load (counter defaults to 0 and rebuilds within bound).
+        // Gated on the on-disk version: nVersion above was already upgraded
+        // in memory for reads.
+        if (diskVersion >= 2) {
+            READWRITE(oRedeemTries);
+        } else if (ser_action.ForRead()) {
+            oRedeemTries = 0;
+        }
     }
 
     void SetNull() {
@@ -194,6 +216,7 @@ struct TransactionDescr
         oHashedSecret.clear();
         oPayTxId.clear();
         oPayTxTries = 0;
+        oRedeemTries = 0;
         oOverpayment = 0;
         lockP2SHAddress.clear();
         lockScript.clear();
@@ -276,6 +299,7 @@ struct TransactionDescr
     std::vector<unsigned char> oHashedSecret;
     std::string                oPayTxId;
     uint32_t                   oPayTxTries{0};
+    uint32_t                   oRedeemTries{0};
     double                     oOverpayment{0};
 
     // multisig address and redeem script
@@ -383,6 +407,20 @@ struct TransactionDescr
 
     uint32_t maxOtherPayTxTries() {
         return 2;
+    }
+
+    uint32_t redeemTries() {
+        LOCK(_lock);
+        return oRedeemTries;
+    }
+
+    uint32_t maxRedeemTries() {
+        return 2;
+    }
+
+    void tryRedeem() {
+        LOCK(_lock);
+        ++oRedeemTries;
     }
 
     void tryOtherPayTx() {
@@ -727,6 +765,7 @@ private:
         oHashedSecret                = d.oHashedSecret;
         oPayTxId                     = d.oPayTxId;
         oPayTxTries                  = d.oPayTxTries;
+        oRedeemTries                 = d.oRedeemTries;
         oOverpayment                 = d.oOverpayment;
         lockP2SHAddress              = d.lockP2SHAddress;
         lockScript                   = d.lockScript;

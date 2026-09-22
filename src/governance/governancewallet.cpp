@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <governance/governancewallet.h>
+#include <algorithm>
 
 #include <wallet/coincontrol.h>
 #include <wallet/fees.h>

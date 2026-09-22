@@ -7,6 +7,8 @@
 #define BITCOIN_SCRIPT_SIGN_H
 
 #include <boost/optional.hpp>
+#include <algorithm>
+#include <iterator>
 #include <hash.h>
 #include <pubkey.h>
 #include <script/interpreter.h>

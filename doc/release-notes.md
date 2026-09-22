@@ -1,76 +1,51 @@
-Bitcoin Core version 0.18.x is now available from:
+Blocknet Core 4.4.1 Release Notes
+==================================
 
-  <https://bitcoincore.org/bin/bitcoin-core-0.18.x/>
+See `doc/release-notes/release-notes-4.3.1.md` for the previous
+release. Historical Bitcoin Core 0.x release notes (inherited from the
+upstream codebase) were removed from `doc/release-notes/`; the git
+history preserves them.
 
-This is a new minor version release, including new features, various bug
-fixes and performance improvements, as well as updated translations.
+This release is primarily a modernization and maintainability release:
+the toolchain, dependency set, CI, and release engineering were brought
+up to date with no consensus or protocol changes.
 
-Please report bugs using the issue tracker at GitHub:
+Toolchain and build
+--------------------
 
-  <https://github.com/bitcoin/bitcoin/issues>
+- Ported the source tree to C++17 and OpenSSL 3; unified Windows builds
+  on a pinned llvm-mingw (Clang/UCRT/libc++) toolchain for x86_64 and
+  aarch64.
+- macOS builds moved to a pure-LLVM toolchain (clang-18 + ld64.lld,
+  Xcode 26.1.1 / SDK 14.0).
+- Refreshed `depends`: zlib, libevent, miniupnpc (CVE/compat), Qt
+  5.15.14, X stack for Qt, toolchain autotools files, expat/fontconfig
+  fixes for the Guix environment.
+- Release binaries are produced exclusively by the deterministic Guix
+  build (`contrib/guix/`, `--with-gui=qt5` hard-fail) across six hosts:
+  x86_64-linux-gnu, aarch64-linux-gnu, x86_64-w64-mingw32,
+  aarch64-w64-mingw32, x86_64-apple-darwin, arm64-apple-darwin.
 
-To receive security and update notifications, please subscribe to:
+CI and release engineering
+---------------------------
 
-  <https://bitcoincore.org/en/list/announcements/join/>
+- Canonical CI (`.github/workflows/ci.yml`): pinned Docker Guix build
+  matrix with per-host artifacts, native sanity build, lint job.
+- Canonical release flow (`.github/workflows/release.yml`): Guix build
+  → Docker Hub image → GitHub release with artifacts and SHA256SUMS.
+- Removed legacy Gitian tooling, MSVC project files, and Bitcoin
+  heritage release notes from the tree.
 
-How to Upgrade
-==============
+Fixes
+-----
 
-If you are running an older version, shut it down. Wait until it has
-completely shut down (which might take a few minutes for older
-versions), then run the installer (on Windows) or just copy over
-`/Applications/Bitcoin-Qt` (on Mac) or `bitcoind`/`bitcoin-qt` (on
-Linux).
-
-The first time you run version 0.15.0 or newer, your chainstate database
-will be converted to a new format, which will take anywhere from a few
-minutes to half an hour, depending on the speed of your machine.
-
-Note that the block database format also changed in version 0.8.0 and
-there is no automatic upgrade code from before version 0.8 to version
-0.15.0 or later. Upgrading directly from 0.7.x and earlier without
-redownloading the blockchain is not supported.  However, as usual, old
-wallet versions are still supported.
-
-Compatibility
-==============
-
-Bitcoin Core is supported and extensively tested on operating systems
-using the Linux kernel, macOS 10.10+, and Windows 7 and newer. It is not
-recommended to use Bitcoin Core on unsupported systems.
-
-Bitcoin Core should also work on most other Unix-like systems but is not
-as frequently tested on them.
-
-From 0.17.0 onwards, macOS <10.10 is no longer supported. 0.17.0 is
-built using Qt 5.9.x, which doesn't support versions of macOS older than
-10.10. Additionally, Bitcoin Core does not yet change appearance when
-macOS "dark mode" is activated.
-
-Known issues
-============
-
-Wallet GUI
-----------
-
-For advanced users who have both (1) enabled coin control features, and
-(2) are using multiple wallets loaded at the same time: The coin control
-input selection dialog can erroneously retain wrong-wallet state when
-switching wallets using the dropdown menu. For now, it is recommended
-not to use coin control features with multiple wallets loaded.
-
-Notable changes
-===============
-
-
-0.18.x change log
-=================
-
-
-Credits
-=======
-
-Thanks to everyone who directly contributed to this release:
-
-
-As well as everyone that helped translating on [Transifex](https://www.transifex.com/projects/p/bitcoin/).
+- wallet: normalize a trailing separator in the canonical `-walletdir`
+  path (boost ≥1.80 `canonical()` semantics change made
+  `-walletdir=<path>/` with a trailing slash fail validation).
+- test: drain validation callbacks before wallet teardown in the PoS
+  test fixture (intermittent crash).
+- test: fix proposal max-size boundary in governance tests.
+- src: assorted missing-include fixes for libc++/C++17 strictness
+  (`util/bip32.h`, `lockedpool.cpp`, explicit instantiation of xrouter
+  `PushXRouterMessage`).
+- configure: dropped EOL Python interpreters from the PATH probe.

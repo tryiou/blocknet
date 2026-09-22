@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <key.h>
+#include <algorithm>
 #include <keystore.h>
 #include <script/ismine.h>
 #include <script/script.h>

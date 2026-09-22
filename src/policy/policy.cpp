@@ -6,6 +6,7 @@
 // NOTE: This file is intended to be customised by the end user, and includes only local node policy logic
 
 #include <policy/policy.h>
+#include <algorithm>
 
 #include <consensus/validation.h>
 #include <validation.h>

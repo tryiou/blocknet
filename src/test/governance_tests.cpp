@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <test/staking_tests.h>
+#include <algorithm>
 
 #include <consensus/tx_verify.h>
 #include <consensus/merkle.h>
@@ -370,7 +371,7 @@ BOOST_FIXTURE_TEST_CASE(governance_tests_proposals, TestChainPoS)
 
     // Proposal with maxed out size should pass (157 bytes is the max size of a proposal)
     gov::Proposal p2m("Test proposal max", nextSuperblock(chainActive.Height(), consensus.superblock), 3000*COIN,
-                     EncodeDestination(dest), "https://forum.blocknet.org", "This description is the maximum allowed for this particular prp");
+                     EncodeDestination(dest), "https://forum.blocknet.org", "This description is the maximum allowed for this particular pr");
     BOOST_CHECK_MESSAGE(p2m.isValid(consensus), "Proposal at max description should pass");
 
     // Proposal with maxed out size + 1 should fail

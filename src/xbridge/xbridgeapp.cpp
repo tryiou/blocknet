@@ -6,7 +6,9 @@
 //*****************************************************************************
 
 #include <xbridge/xbridgeapp.h>
+#include <iterator>
 
+#include <random.h>
 #include <xbridge/util/logger.h>
 #include <xbridge/util/settings.h>
 #include <xbridge/util/txlog.h>
@@ -85,10 +87,9 @@ class App::Impl
 {
     friend class App;
 
-    enum
-    {
-        TIMER_INTERVAL = 15
-    };
+    // NOTE: typed constexpr (not unscoped enum) — Boost >= 1.70
+    // constrains posix_time::seconds() to integral types.
+    static constexpr long TIMER_INTERVAL = 15;
 
 protected:
     /**
@@ -1782,7 +1783,7 @@ xbridge::Error App::sendXBridgeTransaction(const std::string & from,
                 }
             } else if (autoSplit) { // If no user supplied utxos, create the partial order prep transaction
                 std::vector<wallet::UtxoEntry> existingUtxos;
-                double vinsTotal{0};
+                CAmount vinsTotalSats{0};
                 std::vector<xbridge::XTxIn> vins;
                 for (const auto & vin : ptr->usedCoins) {
                     // If we already have exact utxos, skip consuming those and subtract from expected total
@@ -1792,29 +1793,33 @@ xbridge::Error App::sendXBridgeTransaction(const std::string & from,
                         partialVoutsTotal -= partialMinimum + partialPerUtxoFees;
                         continue;
                     }
-                    vinsTotal += vin.amount;
-                    vins.emplace_back(vin.txId, vin.vout, vin.amount);
+                    const CAmount vinSats = xBridgeWalletSatsFromReal(vin.amount, connFrom->COIN);
+                    vinsTotalSats += vinSats;
+                    vins.emplace_back(vin.txId, vin.vout, vinSats);
                 }
 
-                std::vector<std::pair<std::string, double>> vouts;
+                // Exact integer outputs (descr -> wallet sats, no doubles)
+                std::vector<std::pair<std::string, CAmount>> vouts;
                 for (int i = 0; i < partialUtxosRequiredForMinimum; ++i)
-                    vouts.emplace_back(ptr->fromAddr, xBridgeValueFromAmount(partialMinimum + partialPerUtxoFees));
+                    vouts.emplace_back(ptr->fromAddr, xBridgeDescrToSats(partialMinimum + partialPerUtxoFees, connFrom->COIN));
                 // add remainder vout if not dust
                 if (partialRemainderRequired && !partialRemainderIsDust)
-                    vouts.emplace_back(ptr->fromAddr, xBridgeValueFromAmount(partialRemainderVoutTotal + partialPerUtxoFees));
+                    vouts.emplace_back(ptr->fromAddr, xBridgeDescrToSats(partialRemainderVoutTotal + partialPerUtxoFees, connFrom->COIN));
                 // Change
-                const double changeAmount = vinsTotal - xBridgeValueFromAmount(partialVoutsTotal) - connFrom->minTxFee1(vins.size(), vouts.size()+1); // vouts + 1 for change
-                if (changeAmount < std::numeric_limits<double>::epsilon()) {
+                const CAmount voutsTotalSats = xBridgeDescrToSats(partialVoutsTotal, connFrom->COIN);
+                const CAmount prepFeeSats = xBridgeWalletSatsFromReal(connFrom->minTxFee1(vins.size(), vouts.size()+1), connFrom->COIN); // vouts + 1 for change
+                const CAmount changeSats = vinsTotalSats - voutsTotalSats - prepFeeSats;
+                if (changeSats <= 0) {
                     unlockCoins(ptr->fromCurrency, ptr->usedCoins);
                     UniValue log_obj(UniValue::VOBJ);
                     log_obj.pushKV("orderid", "unknown");
-                    log_obj.pushKV("change_amount", xBridgeStringValueFromPrice(changeAmount, connFrom->COIN));
+                    log_obj.pushKV("change_amount", xBridgeStringValueFromPrice(static_cast<double>(changeSats) / connFrom->COIN, connFrom->COIN));
                     log_obj.pushKV("from_currency", connFrom->currency);
                     xbridge::LogOrderMsg(log_obj, "failed to create order, insufficient funds on partial order", __FUNCTION__);
                     return xbridge::Error::INVALID_AMOUNT;
                 }
-                if (!connFrom->isDustAmount(changeAmount))
-                    vouts.emplace_back(ptr->fromAddr, changeAmount);
+                if (!connFrom->isDustAmount(static_cast<double>(changeSats) / connFrom->COIN))
+                    vouts.emplace_back(ptr->fromAddr, changeSats);
 
                 std::string txid, rawtx;
                 if (!connFrom->createPartialTransaction(vins, vouts, txid, rawtx)) {
@@ -1852,7 +1857,8 @@ xbridge::Error App::sendXBridgeTransaction(const std::string & from,
                     xbridge::wallet::UtxoEntry entry;
                     entry.txId = txid;
                     entry.vout = i;
-                    entry.amount = vouts[i].second;
+                    // vouts carry wallet sats; UtxoEntry.amount is coin double
+                    entry.amount = static_cast<double>(vouts[i].second) / connFrom->COIN;
                     entry.address = connFrom->fromXAddr(connFrom->toXAddr(vouts[i].first));
                     ptr->usedCoins.push_back(entry);
                     partialNewTotalUtxosAmount += entry.camount();
@@ -2206,14 +2212,18 @@ Error App::acceptXBridgeTransaction(const uint256 & id, const std::string & from
     // transaction info
     size_t maxBytes = nMaxDatacarrierBytes-3;
 
-    json_spirit::Array info;
+    UniValue info(UniValue::VARR);
     info.push_back("");
     info.push_back(ptr->fromCurrency);
-    info.push_back(ptr->fromAmount);
+    info.push_back(static_cast<int64_t>(ptr->fromAmount));
     info.push_back(ptr->toCurrency);
-    info.push_back(ptr->toAmount);
-    std::string strInfo = write_string(json_spirit::Value(info));
-    info.erase(info.begin());
+    info.push_back(static_cast<int64_t>(ptr->toAmount));
+    std::string strInfo = info.write();
+    // drop the placeholder front element (order id slot)
+    UniValue tmp(UniValue::VARR);
+    for (size_t i = 1; i < info.size(); ++i)
+        tmp.push_back(info[i]);
+    info = std::move(tmp);
 
     // Truncate the order id in situations where we don't have enough space in the tx
     std::string orderId{ptr->id.GetHex()};
@@ -2221,8 +2231,13 @@ Error App::acceptXBridgeTransaction(const uint256 & id, const std::string & from
         auto leftOver = maxBytes - strInfo.size();
         orderId.erase(leftOver, std::string::npos);
     }
-    info.insert(info.begin(), orderId); // add order id to the front
-    strInfo = write_string(json_spirit::Value(info));
+    // add order id to the front
+    UniValue info2(UniValue::VARR);
+    info2.push_back(orderId);
+    for (size_t i = 0; i < info.size(); ++i)
+        info2.push_back(info[i]);
+    info = std::move(info2);
+    strInfo = info.write();
     if (strInfo.size() > maxBytes) { // make sure we're not too large
         revertOrder(ptr);
         return xbridge::Error::INVALID_ONCHAIN_HISTORY;
@@ -2678,7 +2693,7 @@ std::vector<std::string> App::myServices(const bool includeXRouter) const {
  * @return
  */
 std::string App::myServicesJSON() const {
-    json_spirit::Array xwallets;
+    UniValue xwallets(UniValue::VARR);
     const auto & services = myServices(false); // do not include xrouter here (xrouter included below)
     for (const auto & service : services)
         xwallets.push_back(service);
@@ -2686,18 +2701,18 @@ std::string App::myServicesJSON() const {
     for (const auto & service : utxwallets) // add unit test supplied services
         xwallets.push_back(service);
 
-    json_spirit::Object result;
-    json_spirit::Value xrouterConfigVal;
+    UniValue result(UniValue::VOBJ);
+    UniValue xrouterConfigVal;
     if (xrouter::App::isEnabled() && xrouter::App::instance().isReady()) {
         auto & xrapp = xrouter::App::instance();
         const std::string & xrouterConfig = xrapp.parseConfig(xrapp.xrSettings());
-        json_spirit::read_string(xrouterConfig, xrouterConfigVal);
+        xrouterConfigVal.read(xrouterConfig);
     }
-    result.emplace_back("xrouterversion", static_cast<int>(XROUTER_PROTOCOL_VERSION));
-    result.emplace_back("xbridgeversion", static_cast<int>(version()));
-    result.emplace_back("xrouter", xrouterConfigVal);
-    result.emplace_back("xbridge", xwallets);
-    return json_spirit::write_string(json_spirit::Value(result), json_spirit::none, 8);
+    result.pushKV("xrouterversion", static_cast<int>(XROUTER_PROTOCOL_VERSION));
+    result.pushKV("xbridgeversion", static_cast<int>(version()));
+    result.pushKV("xrouter", xrouterConfigVal);
+    result.pushKV("xbridge", xwallets);
+    return result.write();
 }
 
 //******************************************************************************
@@ -2930,8 +2945,8 @@ std::vector<CPubKey> App::Impl::findShuffledNodesWithService(
                 list.push_back(x.getSnodePubKey());
         }
     }
-    static std::default_random_engine rng{0};
-    std::shuffle(list.begin(), list.end(), rng);
+    static FastRandomContext rng{/*fDeterministic=*/false};
+    Shuffle(list.begin(), list.end(), rng);
     return list;
 }
 
@@ -2950,21 +2965,6 @@ bool App::Impl::hasNodeService(const CPubKey & nodePubKey, const std::string & s
     if (snode.isNull() || (checkRunning && !snode.running()))
         return false;
     return snode.hasService(service);
-}
-
-//******************************************************************************
-//******************************************************************************
-template <typename T>
-T random_element(T begin, T end)
-{
-    const unsigned long n = std::distance(begin, end);
-    const unsigned long divisor = (RAND_MAX + 1) / n;
-
-    unsigned long k;
-    do { k = std::rand() / divisor; } while (k >= n);
-
-    std::advance(begin, k);
-    return begin;
 }
 
 //******************************************************************************

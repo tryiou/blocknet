@@ -289,7 +289,7 @@ uint256 SignatureHash(const CScript &scriptCode, const CTransactionPtr & tx,
 //******************************************************************************
 xbridge::CTransactionPtr createTransaction(const bool txWithTimeField);
 xbridge::CTransactionPtr createTransaction(const std::vector<XTxIn> & inputs,
-                                           const std::vector<std::pair<std::string, double> > & outputs,
+                                           const std::vector<std::pair<std::string, CAmount> > & outputs,
                                            const uint64_t COIN,
                                            const uint32_t txversion,
                                            const uint32_t lockTime,
@@ -363,7 +363,7 @@ std::string BchWalletConnector::scriptIdToString(const std::vector<unsigned char
 xbridge::CTransactionPtr createTransaction(const bool txWithTimeField = false);
 xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
                                            const std::vector<XTxIn> & inputs,
-                                           const std::vector<std::pair<std::string, double> >  & outputs,
+                                           const std::vector<std::pair<std::string, CAmount> >  & outputs,
                                            const uint64_t COIN,
                                            const uint32_t txversion,
                                            const uint32_t lockTime,
@@ -372,7 +372,7 @@ xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
 //******************************************************************************
 //******************************************************************************
 bool BchWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                                 const std::vector<std::pair<std::string, double> > & outputs,
+                                                 const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                  const std::vector<unsigned char> & mpubKey,
                                                  const std::vector<unsigned char> & mprivKey,
                                                  const std::vector<unsigned char> & innerScript,
@@ -395,7 +395,7 @@ bool BchWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inpu
 
         SigHashType sigHashType = SigHashType(SIGHASH_ALL).withForkId();
         std::vector<unsigned char> signature;
-        uint256 hash = SignatureHash(inner, txUnsigned, 0, sigHashType, inputs[0].amount*COIN, rpe);
+        uint256 hash = SignatureHash(inner, txUnsigned, 0, sigHashType, inputs[0].amountSats, rpe);
         if (!m_cp.sign(mprivKey, hash, signature))
         {
             LOG() << "bch sign transaction error " << __FUNCTION__;
@@ -427,7 +427,7 @@ bool BchWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inpu
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, reftxid, json))
     {
         LOG() << "bch decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = reftxid;
@@ -438,7 +438,7 @@ bool BchWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inpu
 //******************************************************************************
 //******************************************************************************
 bool BchWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                                  const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                   const std::vector<unsigned char> & mpubKey,
                                                   const std::vector<unsigned char> & mprivKey,
                                                   const std::vector<unsigned char> & xpubKey,
@@ -453,7 +453,7 @@ bool BchWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & inp
 
     SigHashType sigHashType = SigHashType(SIGHASH_ALL).withForkId();
     std::vector<unsigned char> signature;
-    uint256 hash = SignatureHash(inner, txUnsigned, 0, sigHashType, inputs[0].amount*COIN, rpe);
+    uint256 hash = SignatureHash(inner, txUnsigned, 0, sigHashType, inputs[0].amountSats, rpe);
     if (!m_cp.sign(mprivKey, hash, signature))
     {
         LOG() << "bch sign transaction error " << __FUNCTION__;
@@ -485,7 +485,7 @@ bool BchWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & inp
     if (!rpc::decodeRawTransaction(m_user, m_passwd, m_ip, m_port, rawTx, paytxid, json))
     {
         LOG() << "bch decode signed transaction error " << __FUNCTION__;
-        return true;
+        return false;
     }
 
     txId  = paytxid;

@@ -6,6 +6,7 @@
 //******************************************************************************
 
 #include <xbridge/util/logger.h>
+#include <iterator>
 #include <xbridge/util/settings.h>
 #include <xbridge/currency.h>
 
@@ -14,7 +15,8 @@
 #include <algorithm>
 
 #include <boost/algorithm/string.hpp>
-#include <boost/program_options.hpp>
+// NOTE: boost/program_options.hpp intentionally NOT included (unused;
+// avoids a libboost_program_options link dependency).
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 

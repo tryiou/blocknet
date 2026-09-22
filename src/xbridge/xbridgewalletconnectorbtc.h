@@ -21,9 +21,6 @@
 
 #include <memory>
 
-#include <json/json_spirit.h>
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
 
 #include <boost/lexical_cast.hpp>
 
@@ -108,9 +105,9 @@ static UniValue XBridgeJSONRPCRequestObj(const std::string& strMethod, const Uni
     return request;
 }
 
-static json_spirit::Object CallRPC(const std::string & rpcuser, const std::string & rpcpasswd,
+static UniValue CallRPC(const std::string & rpcuser, const std::string & rpcpasswd,
                       const std::string & rpcip, const std::string & rpcport,
-                      const std::string & strMethod, const json_spirit::Array & params,
+                      const std::string & strMethod, const UniValue & params,
                       const std::string & jsonver="", const std::string & contenttype="")
 {
     const std::string & host = rpcip;
@@ -145,11 +142,9 @@ static json_spirit::Object CallRPC(const std::string & rpcuser, const std::strin
     }
 
     // Attach request data
-    const auto tostring = json_spirit::write_string(json_spirit::Value(params), json_spirit::none, 8);
-    UniValue toval;
-    if (!toval.read(tostring))
-        throw std::runtime_error(strprintf("failed to decode json_spirit data: %s", tostring));
-    const auto reqobj = XBridgeJSONRPCRequestObj(strMethod, toval.get_array(), 1, jsonver);
+    if (!params.isArray())
+        throw std::runtime_error("rpc params must be a json array");
+    const auto reqobj = XBridgeJSONRPCRequestObj(strMethod, params, 1, jsonver);
     std::string strRequest = reqobj.write() + "\n";
     struct evbuffer* output_buffer = evhttp_request_get_output_buffer(req.get());
     assert(output_buffer);
@@ -179,10 +174,10 @@ static json_spirit::Object CallRPC(const std::string & rpcuser, const std::strin
         throw std::runtime_error("no response from server");
 
     // Parse reply
-    json_spirit::Value valReply;
-    if (!json_spirit::read_string(response.body, valReply))
+    UniValue valReply;
+    if (!valReply.read(response.body) || !valReply.isObject())
         throw std::runtime_error("couldn't parse reply from server");
-    const json_spirit::Object& reply = valReply.get_obj();
+    const UniValue& reply = valReply.get_obj();
     if (reply.empty())
         throw std::runtime_error("expected reply to have result, error and id properties");
 
@@ -277,13 +272,13 @@ public:
                                    std::vector<unsigned char> & resultSript);
 
     bool createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                  const std::vector<std::pair<std::string, std::string> > & outputs,
                                   std::string & txId,
                                   uint32_t & txVout,
                                   std::string & rawTx);
 
     bool createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                 const std::vector<std::pair<std::string, double> > & outputs,
+                                 const std::vector<std::pair<std::string, CAmount> > & outputs,
                                  const std::vector<unsigned char> & mpubKey,
                                  const std::vector<unsigned char> & mprivKey,
                                  const std::vector<unsigned char> & innerScript,
@@ -292,7 +287,7 @@ public:
                                  std::string & rawTx);
 
     bool createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                  const std::vector<std::pair<std::string, CAmount> > & outputs,
                                   const std::vector<unsigned char> & mpubKey,
                                   const std::vector<unsigned char> & mprivKey,
                                   const std::vector<unsigned char> & xpubKey,
@@ -301,7 +296,7 @@ public:
                                   std::string & rawTx);
 
     bool createPartialTransaction(const std::vector<XTxIn> inputs,
-                              const std::vector<std::pair<std::string, double> > outputs,
+                              const std::vector<std::pair<std::string, CAmount> > outputs,
                               std::string & txId,
                               std::string & rawTx) override;
 

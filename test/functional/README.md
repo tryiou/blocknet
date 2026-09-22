@@ -21,9 +21,9 @@ don't have test cases for.
 - Use a python linter like flake8 before submitting PRs to catch common style
   nits (eg trailing whitespace, unused imports, etc)
 - The oldest supported Python version is specified in [doc/dependencies.md](/doc/dependencies.md).
-  Consider using [pyenv](https://github.com/pyenv/pyenv), which checks [.python-version](/.python-version),
-  to prevent accidentally introducing modern syntax from an unsupported Python version.
-  The Travis linter also checks this, but [possibly not in all cases](https://github.com/bitcoin/bitcoin/pull/14884#discussion_r239585126).
+  Use the host's python3 to prevent accidentally introducing syntax from an unsupported
+  Python version.
+  The CI linter also checks this, but possibly not in all cases.
 - See [the python lint script](/test/lint/lint-python.sh) that checks for violations that
   could lead to bugs and issues in the test code.
 - Avoid wildcard imports
@@ -54,7 +54,7 @@ don't have test cases for.
 - Set `self.num_nodes` to the minimum number of nodes necessary for the test.
   Having additional unrequired nodes adds to the execution time of the test as
   well as memory/CPU/disk requirements (which is important when running tests in
-  parallel or on Travis).
+  parallel or on CI).
 - Avoid stop-starting the nodes multiple times during the test if possible. A
   stop-start takes several seconds, so doing it several times blows up the
   runtime of the test.
@@ -87,10 +87,10 @@ over the network (`CBlock`, `CTransaction`, etc, along with the network-level
 wrappers for them, `msg_block`, `msg_tx`, etc).
 
 - P2P tests have two threads. One thread handles all network communication
-with the bitcoind(s) being tested in a callback-based event loop; the other
+with the blocknetd(s) being tested in a callback-based event loop; the other
 implements the test logic.
 
-- `P2PConnection` is the class used to connect to a bitcoind.  `P2PInterface`
+- `P2PConnection` is the class used to connect to a blocknetd.  `P2PInterface`
 contains the higher level logic for processing P2P payloads and connecting to
 the Bitcoin Core node application logic. For custom behaviour, subclass the
 P2PInterface object and override the callback methods.
@@ -110,7 +110,7 @@ Base class for functional tests.
 Generally useful functions.
 
 #### [test_framework/mininode.py](test_framework/mininode.py)
-Basic code to support P2P connectivity to a bitcoind.
+Basic code to support P2P connectivity to a blocknetd.
 
 #### [test_framework/script.py](test_framework/script.py)
 Utilities for manipulating transaction scripts (originally from python-bitcoinlib)

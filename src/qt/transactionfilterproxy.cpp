@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/transactionfilterproxy.h>
+#include <algorithm>
 
 #include <qt/transactiontablemodel.h>
 #include <qt/transactionrecord.h>
@@ -63,6 +64,15 @@ bool TransactionFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &
         return false;
 
     return true;
+}
+
+bool TransactionFilterProxy::lessThan(const QModelIndex &left, const QModelIndex &right) const
+{
+    QVariant l = sourceModel()->data(left, sortRole());
+    QVariant r = sourceModel()->data(right, sortRole());
+    if (l.userType() == QMetaType::QString)
+        return l.toString().compare(r.toString(), sortCaseSensitivity()) < 0;
+    return QSortFilterProxyModel::lessThan(left, right);
 }
 
 void TransactionFilterProxy::setDateRange(const QDateTime &from, const QDateTime &to)

@@ -8,6 +8,7 @@
 #define BITCOIN_HASH_H
 
 #include <crypto/common.h>
+#include <algorithm>
 #include <crypto/ripemd160.h>
 #include <crypto/sha256.h>
 #include <prevector.h>

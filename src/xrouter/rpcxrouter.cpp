@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <rpc/server.h>
+#include <iterator>
 
 #include <xbridge/xbridgeapp.h>
 #include <xrouter/xrouterapp.h>
@@ -14,31 +15,15 @@
 #include <uint256.h>
 #include <util/strencodings.h>
 #include <rpc/util.h>
+#include <random.h>
 
 #include <exception>
 #include <netmessagemaker.h>
 #include <regex>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
-
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 
-using namespace json_spirit;
-
-static UniValue uret_xr(const json_spirit::Value & o) {
-    UniValue uv;
-    const auto str = json_spirit::write_string(o, json_spirit::none, 8);
-    try {
-        if (!uv.read(str))
-            uv.setStr(str);
-    } catch (...) {
-        uv.setStr(str);
-    }
-    return uv;
-}
 
 static UniValue uret_xr(const std::string & str) {
     UniValue uv;
@@ -1455,10 +1440,10 @@ static UniValue xrConnectedNodes(const JSONRPCRequest& request)
     auto & app = xrouter::App::instance();
     const auto configs = app.getNodeConfigs();
 
-    Array data;
+    UniValue data(UniValue::VARR);
     app.snodeConfigJSON(configs, data);
 
-    return xrouter::form_reply(uuid, uret_xr(Value(data)));
+    return xrouter::form_reply(uuid, data);
 }
 
 static UniValue xrConnect(const JSONRPCRequest& request)
@@ -1583,7 +1568,7 @@ static UniValue xrConnect(const JSONRPCRequest& request)
     auto & app = xrouter::App::instance();
     std::map<std::string, std::pair<xrouter::XRouterSettingsPtr, sn::ServiceNode::Tier>> configs;
 
-    Array data;
+    UniValue data(UniValue::VARR);
 
     try {
         uint32_t found{0};
@@ -1609,7 +1594,7 @@ static UniValue xrConnect(const JSONRPCRequest& request)
         return error;
     }
 
-    return xrouter::form_reply(uuid, uret_xr(Value(data)));
+    return xrouter::form_reply(uuid, data);
 }
 
 static UniValue xrGetNetworkServices(const JSONRPCRequest& request)
@@ -1779,7 +1764,7 @@ static UniValue xrUpdateNetworkServices(const JSONRPCRequest& request) {
     }
 
     auto randnode = [](std::set<std::string> & vnodes) -> std::string {
-        auto idx = rand() & (vnodes.size()-1);
+        auto idx = GetRand(vnodes.size()); // unbiased, node RNG
         auto it = vnodes.begin();
         std::advance(it, idx);
         const auto addr = *it;

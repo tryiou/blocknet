@@ -313,7 +313,7 @@ XParticlTransaction createTransaction(const bool txWithTimeField)
 
 XParticlTransaction createTransaction(const WalletConnector & conn,
                                            const std::vector<XTxIn> & inputs,
-                                           const std::vector<std::pair<std::string, double> >  & outputs,
+                                           const std::vector<std::pair<std::string, CAmount> >  & outputs,
                                            const uint64_t COIN,
                                            const uint32_t txversion,
                                            const uint32_t lockTime,
@@ -327,14 +327,14 @@ XParticlTransaction createTransaction(const WalletConnector & conn,
         tx.vin.push_back(CTxIn(COutPoint(uint256S(in.txid), in.n)));
     }
 
-    for (const std::pair<std::string, double> & out : outputs)
+    for (const std::pair<std::string, CAmount> & out : outputs)
     {
         std::vector<unsigned char> id = conn.toXAddr(out.first);
 
         CScript scr;
         scr << OP_DUP << OP_HASH160 << ToByteVector(id) << OP_EQUALVERIFY << OP_CHECKSIG;
 
-        tx.vout.push_back(CTxOut(out.second * COIN, scr));
+        tx.vout.push_back(CTxOut(out.second, scr));
     }
 
     return tx;
@@ -348,7 +348,7 @@ PartWalletConnector::PartWalletConnector(){}
 //******************************************************************************
 //******************************************************************************
 bool PartWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                                  const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                   const std::vector<unsigned char> & mpubKey,
                                                   const std::vector<unsigned char> & mprivKey,
                                                   const std::vector<unsigned char> & innerScript,
@@ -367,7 +367,7 @@ bool PartWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inp
     CScript inner(innerScript.begin(), innerScript.end());
 
     std::vector<unsigned char> signature;
-    uint256 hash = SignatureHash(inner, txUnsigned, 0, SIGHASH_ALL, inputs[0].amount*COIN);
+    uint256 hash = SignatureHash(inner, txUnsigned, 0, SIGHASH_ALL, inputs[0].amountSats);
     if (!m_cp.sign(mprivKey, hash, signature)) {
         LOG() << "sign transaction error, transaction canceled " << __FUNCTION__;
         return false;
@@ -406,7 +406,7 @@ bool PartWalletConnector::createRefundTransaction(const std::vector<XTxIn> & inp
 //******************************************************************************
 //******************************************************************************
 bool PartWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                                   const std::vector<std::pair<std::string, double> > & outputs,
+                                                   const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                    const std::vector<unsigned char> & mpubKey,
                                                    const std::vector<unsigned char> & mprivKey,
                                                    const std::vector<unsigned char> & xpubKey,
@@ -422,7 +422,7 @@ bool PartWalletConnector::createPaymentTransaction(const std::vector<XTxIn> & in
     CScript inner(innerScript.begin(), innerScript.end());
 
     std::vector<unsigned char> signature;
-    uint256 hash = SignatureHash(inner, txUnsigned, 0, SIGHASH_ALL, inputs[0].amount*COIN);
+    uint256 hash = SignatureHash(inner, txUnsigned, 0, SIGHASH_ALL, inputs[0].amountSats);
     if (!m_cp.sign(mprivKey, hash, signature)) {
         LOG() << "sign transaction error, transaction canceled " << __FUNCTION__;
         return false;

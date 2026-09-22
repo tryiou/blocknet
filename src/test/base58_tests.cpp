@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <test/data/base58_encode_decode.json.h>
+#include <algorithm>
 
 #include <base58.h>
 #include <test/test_bitcoin.h>

@@ -7,6 +7,7 @@
 #define BITCOIN_RANDOM_H
 
 #include <crypto/chacha20.h>
+#include <algorithm>
 #include <crypto/common.h>
 #include <uint256.h>
 

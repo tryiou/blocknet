@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <bloom.h>
+#include <algorithm>
 
 #include <primitives/transaction.h>
 #include <hash.h>

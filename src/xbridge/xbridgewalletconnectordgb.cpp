@@ -11,8 +11,6 @@
 #include <xbridge/util/xutil.h>
 #include <xbridge/xbitcointransaction.h>
 
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
 
 //*****************************************************************************
 //*****************************************************************************
@@ -24,7 +22,6 @@ namespace xbridge
 namespace rpc
 {
 
-using namespace json_spirit;
 
 //*****************************************************************************
 //*****************************************************************************
@@ -33,7 +30,7 @@ bool createRawTransaction(const std::string & rpcuser,
                           const std::string & rpcip,
                           const std::string & rpcport,
                           const std::vector<XTxIn> & inputs,
-                          const std::vector<std::pair<std::string, double> > & outputs,
+                          const std::vector<std::pair<std::string, std::string> > & outputs,
                           const uint32_t lockTime,
                           std::string & tx,
                           bool cltv);
@@ -63,42 +60,42 @@ bool signRawTransactionWithWallet(const std::string & rpcuser,
     {
         LOG() << "rpc call <signrawtransactionwithwallet>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
 
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransactionwithwallet", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransactionwithwallet", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object obj = result.get_obj();
-        const Value  & tx = find_value(obj, "hex");
-        const Value & cpl = find_value(obj, "complete");
+        UniValue obj = result.get_obj();
+        const UniValue & tx = find_value(obj, "hex");
+        const UniValue & cpl = find_value(obj, "complete");
 
-        if (tx.type() != str_type || cpl.type() != bool_type)
+        if (!tx.isStr() || !cpl.isBool())
         {
             LOG() << "bad hex " <<
-                     (tx.type() == null_type ? "" :
-                      tx.type() == str_type  ? tx.get_str() :
-                                                   write_string(tx, true));
+                     (tx.isNull() ? "" :
+                      tx.isStr()  ? tx.get_str() :
+                                                   tx.write(4, 1));
             return false;
         }
 
@@ -129,7 +126,7 @@ DgbWalletConnector::DgbWalletConnector()
 //******************************************************************************
 //******************************************************************************
 bool DgbWalletConnector::createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                                  const std::vector<std::pair<std::string, std::string> > & outputs,
                                                   std::string & txId,
                                                   uint32_t & txVout,
                                                   std::string & rawTx)

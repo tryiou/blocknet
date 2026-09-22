@@ -47,16 +47,6 @@ namespace rpc
         double amount;
     };
 
-    bool createRawTransaction(const std::string & rpcuser,
-                              const std::string & rpcpasswd,
-                              const std::string & rpcip,
-                              const std::string & rpcport,
-                              const std::vector<std::pair<std::string, int> > & inputs,
-                              const std::vector<std::pair<std::string, double> > & outputs,
-                              const uint32_t lockTime,
-                              std::string & tx,
-                              bool cltv);
-
     bool decodeRawTransaction(const std::string & rpcuser,
                               const std::string & rpcpasswd,
                               const std::string & rpcip,

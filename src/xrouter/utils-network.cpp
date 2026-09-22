@@ -18,7 +18,6 @@
 #include <stdio.h>
 
 #include <boost/lexical_cast.hpp>
-#include <json/json_spirit_writer_template.h>
 
 #ifdef ENABLE_EVENTSSL
 #include <event2/bufferevent_ssl.h>
@@ -123,14 +122,14 @@ UniValue XRouterJSONRPCRequestObj(const std::string& strMethod, const UniValue& 
 }
 
 std::string CallRPC(const std::string & rpcip, const std::string & rpcport, const std::string & strMethod,
-                    const Array & params, const std::string & jsonver, const std::string & contenttype)
+                    const UniValue & params, const std::string & jsonver, const std::string & contenttype)
 {
     return std::move(CallRPC("", "", rpcip, rpcport, strMethod, params, jsonver));
 }
 
 std::string CallRPC(const std::string & rpcuser, const std::string & rpcpasswd,
                       const std::string & rpcip, const std::string & rpcport,
-                      const std::string & strMethod, const json_spirit::Array & params,
+                      const std::string & strMethod, const UniValue & params,
                       const std::string & jsonver, const std::string & contenttype)
 {
     const std::string & host = rpcip;
@@ -165,11 +164,9 @@ std::string CallRPC(const std::string & rpcuser, const std::string & rpcpasswd,
     }
 
     // Attach request data
-    const auto tostring = json_spirit::write_string(json_spirit::Value(params), json_spirit::none, 8);
-    UniValue toval;
-    if (!toval.read(tostring))
-        throw std::runtime_error(strprintf("failed to decode json_spirit data: %s", tostring));
-    const auto reqobj = XRouterJSONRPCRequestObj(strMethod, toval.get_array(), 1, jsonver);
+    if (!params.isArray())
+        throw std::runtime_error("rpc params must be a json array");
+    const auto reqobj = XRouterJSONRPCRequestObj(strMethod, params, 1, jsonver);
     std::string strRequest = reqobj.write() + "\n";
     struct evbuffer* output_buffer = evhttp_request_get_output_buffer(req.get());
     assert(output_buffer);
@@ -312,11 +309,14 @@ XRouterReply CallXRouterUrlSSL(const std::string & host, const int & port, const
         if (req) evhttp_request_free(req);
     };
 
-    SSL_CTX *ssl_ctx = SSL_CTX_new(SSLv23_method());
+    // SSLv23_method() is a deprecated alias; TLS_client_method() is the
+    // OpenSSL 1.1.0+/3.x API. Require TLS >= 1.2 explicitly.
+    SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_client_method());
     if (ssl_ctx == nullptr) {
         cleanup(ssl_ctx);
         throw std::runtime_error("failed to open ssl connection (1)");
     }
+    SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_2_VERSION);
     // TODO Blocknet xrclient cert verification
 //    int c1 = SSL_CTX_set_default_verify_paths(ssl_ctx);
 //    int c2 = SSL_CTX_load_verify_locations(ssl_ctx, "/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/certs"); // debian

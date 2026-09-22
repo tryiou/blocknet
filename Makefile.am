@@ -30,6 +30,7 @@ OSX_APP_NOEXT=Blocknet
 OSX_APP=$(OSX_APP_NOEXT).app
 OSX_VOLNAME = $(subst $(space),-,$(PACKAGE_NAME))
 OSX_DMG = $(OSX_VOLNAME).dmg
+OSX_ZIP = $(OSX_VOLNAME).zip
 OSX_BACKGROUND_SVG=background.svg
 OSX_BACKGROUND_IMAGE=background.tiff
 OSX_BACKGROUND_IMAGE_DPIS=36 72
@@ -115,8 +116,10 @@ osx_volname:
 	echo $(OSX_VOLNAME) >$@
 
 if BUILD_DARWIN
-$(OSX_DMG): $(OSX_APP_BUILT) $(OSX_PACKAGING) $(OSX_BACKGROUND_IMAGE)
-	$(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) -add-qt-tr $(OSX_QT_TRANSLATIONS) -translations-dir=$(QT_TRANSLATION_DIR) -dmg -fancy $(OSX_FANCY_PLIST) -verbose 2 -volname $(OSX_VOLNAME)
+$(OSX_ZIP): $(OSX_APP_BUILT) $(OSX_PACKAGING)
+	$(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) $(OSX_VOLNAME) -translations-dir=$(QT_TRANSLATION_DIR) -zip
+
+deploydir: $(OSX_ZIP)
 
 $(OSX_BACKGROUND_IMAGE).png: contrib/macdeploy/$(OSX_BACKGROUND_SVG)
 	sed 's/PACKAGE_NAME/$(PACKAGE_NAME)/' < "$<" | $(RSVG_CONVERT) -f png -d 36 -p 36 -o $@
@@ -125,7 +128,6 @@ $(OSX_BACKGROUND_IMAGE)@2x.png: contrib/macdeploy/$(OSX_BACKGROUND_SVG)
 $(OSX_BACKGROUND_IMAGE): $(OSX_BACKGROUND_IMAGE).png $(OSX_BACKGROUND_IMAGE)@2x.png
 	tiffutil -cathidpicheck $^ -out $@
 
-deploydir: $(OSX_DMG)
 else
 APP_DIST_DIR=$(top_builddir)/dist
 APP_DIST_EXTRAS=$(APP_DIST_DIR)/.background/$(OSX_BACKGROUND_IMAGE) $(APP_DIST_DIR)/.DS_Store $(APP_DIST_DIR)/Applications
@@ -150,14 +152,18 @@ $(APP_DIST_DIR)/.DS_Store: $(OSX_DSSTORE_GEN)
 	$(PYTHON) $< "$@" "$(OSX_VOLNAME)"
 
 $(APP_DIST_DIR)/$(OSX_APP)/Contents/MacOS/$(OSX_APP_NOEXT): $(OSX_APP_BUILT) $(OSX_PACKAGING)
-	INSTALLNAMETOOL=$(INSTALLNAMETOOL)  OTOOL=$(OTOOL) STRIP=$(STRIP) $(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) -translations-dir=$(QT_TRANSLATION_DIR) -add-qt-tr $(OSX_QT_TRANSLATIONS) -verbose 2
+	OBJDUMP=$(OBJDUMP) INSTALL_NAME_TOOL=$(INSTALLNAMETOOL) STRIP=$(STRIP) $(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) $(OSX_APP_NOEXT) -translations-dir=$(QT_TRANSLATION_DIR)
 
 deploydir: $(APP_DIST_EXTRAS)
 endif
 
 if TARGET_DARWIN
 appbundle: $(OSX_APP_BUILT)
+if BUILD_DARWIN
+deploy: $(OSX_ZIP)
+else
 deploy: $(OSX_DMG)
+endif
 endif
 if TARGET_WINDOWS
 deploy: $(BITCOIN_WIN_INSTALLER)
@@ -286,7 +292,7 @@ EXTRA_DIST += \
     test/util/data/txcreatesignv2.hex \
     test/util/rpcauth-test.py
 
-CLEANFILES = $(OSX_DMG) $(BITCOIN_WIN_INSTALLER)
+CLEANFILES = $(OSX_DMG) $(OSX_ZIP) $(BITCOIN_WIN_INSTALLER)
 
 .INTERMEDIATE: $(COVERAGE_INFO)
 

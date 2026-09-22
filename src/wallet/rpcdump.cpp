@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <chain.h>
+#include <algorithm>
+#include <iterator>
 #include <core_io.h>
 #include <interfaces/chain.h>
 #include <key_io.h>

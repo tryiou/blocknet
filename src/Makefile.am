@@ -248,19 +248,6 @@ BITCOIN_CORE_H = \
   zmq/zmqpublishnotifier.h \
   zmq/zmqrpc.h
 
-# Blocknet requires the json spirit library
-JSON_H = \
-  json/json_spirit.h \
-  json/json_spirit_error_position.h \
-  json/json_spirit_reader.h \
-  json/json_spirit_reader_template.h \
-  json/json_spirit_stream_reader.h \
-  json/json_spirit_utils.h \
-  json/json_spirit_value.h \
-  json/json_spirit_writer.h \
-  json/json_spirit_writer_template.h \
-  json/json_spirit_writer_options.h
-
 # Blocknet XBridge
 BITCOIN_CORE_H += \
   xbridge/bitcoinrpcconnector.h \
@@ -275,6 +262,7 @@ BITCOIN_CORE_H += \
   xbridge/util/txlog.h \
   xbridge/util/xassert.h \
   xbridge/util/xbridgeerror.h \
+  xbridge/util/secpctx.h \
   xbridge/util/xseries.h \
   xbridge/util/xutil.h \
   xbridge/version.h \
@@ -288,7 +276,6 @@ BITCOIN_CORE_H += \
   xbridge/xbridgepacket.h \
   xbridge/xbridgerpc.h \
   xbridge/xbridgesession.h \
-  xbridge/xbridgesessiondcr.h \
   xbridge/xbridgetransaction.h \
   xbridge/xbridgetransactiondescr.h \
   xbridge/xbridgetransactionmember.h \
@@ -385,9 +372,6 @@ libbitcoin_server_a_SOURCES = \
   validationinterface.cpp \
   versionbits.cpp \
   $(BITCOIN_CORE_H)
-
-# Blocknet requires json spirit library
-libbitcoin_server_a_SOURCES += $(JSON_H)
 
 # Blocknet governance wallet methods
 if ENABLE_WALLET
@@ -611,6 +595,7 @@ xbridge_libxbridge_a_SOURCES = \
   xbridge/rpcxbridge.cpp \
   xbridge/util/logger.cpp \
   xbridge/util/posixtimeconversion.cpp \
+  xbridge/util/secpctx.cpp \
   xbridge/util/settings.cpp \
   xbridge/util/txlog.cpp \
   xbridge/util/xbridgeerror.cpp \
@@ -625,7 +610,6 @@ xbridge_libxbridge_a_SOURCES = \
   xbridge/xbridgepacket.cpp \
   xbridge/xbridgerpc.cpp \
   xbridge/xbridgesession.cpp \
-  xbridge/xbridgesessiondcr.cpp \
   xbridge/xbridgetransaction.cpp \
   xbridge/xbridgetransactiondescr.cpp \
   xbridge/xbridgetransactionmember.cpp \
@@ -638,7 +622,6 @@ xbridge_libxbridge_a_SOURCES = \
   xbridge/xbridgewalletconnectordevault.cpp \
   xbridge/xbridgewalletconnectorstealth.cpp \
   xbridge/xbridgewalletconnectorpart.cpp \
-  $(JSON_H) \
   $(BITCOIN_CORE_H)
 
 # xrouter: interoperability protocol
@@ -662,7 +645,6 @@ xrouter_libxrouter_a_SOURCES = \
   xrouter/xroutersettings.cpp \
   xrouter/xroutersnodeconfig.cpp \
   servicenode/servicenodemgr.cpp \
-  $(JSON_H) \
   $(BITCOIN_CORE_H)
 
 if GLIBC_BACK_COMPAT
@@ -690,6 +672,8 @@ if TARGET_WINDOWS
 blocknetd_SOURCES += bitcoind-res.rc
 endif
 
+# SERVER appears twice: static link order — wallet references interfaces::*
+# symbols defined in the server lib (circular wallet<->server deps).
 blocknetd_LDADD = \
   $(LIBBITCOIN_SERVER) \
   $(LIBBITCOIN_WALLET) \
@@ -855,19 +839,13 @@ clean-local:
 check-symbols: $(bin_PROGRAMS)
 if GLIBC_BACK_COMPAT
 	@echo "Checking glibc back compat..."
-	$(AM_V_at) READELF=$(READELF) CPPFILT=$(CPPFILT) $(top_srcdir)/contrib/devtools/symbol-check.py $(bin_PROGRAMS)
+	$(AM_V_at) READELF=$(READELF) CPPFILT=$(CPPFILT) python3 $(top_srcdir)/contrib/devtools/symbol-check.py $(bin_PROGRAMS)
 endif
 
 check-security: $(bin_PROGRAMS)
 if HARDEN
 	@echo "Checking binary security..."
-	$(AM_V_at) READELF=$(READELF) OBJDUMP=$(OBJDUMP) $(top_srcdir)/contrib/devtools/security-check.py $(bin_PROGRAMS)
-endif
-
-if ENABLE_BIP70
-%.pb.cc %.pb.h: %.proto
-	@test -f $(PROTOC)
-	$(AM_V_GEN) $(PROTOC) --cpp_out=$(@D) --proto_path=$(<D) $<
+	$(AM_V_at) READELF=$(READELF) OBJDUMP=$(OBJDUMP) python3 $(top_srcdir)/contrib/devtools/security-check.py $(bin_PROGRAMS)
 endif
 
 if EMBEDDED_LEVELDB

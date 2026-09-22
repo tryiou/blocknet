@@ -1,0 +1,224 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. v4.4.1 or commit SHA). Leave empty for tag."
+        required: false
+        default: ""
+      os_filter:
+        description: "OS filter for Guix (l,w,m or lwm)"
+        required: false
+        default: "lwm"
+
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Deterministic Guix builds — ALL inside pinned Docker
+  # blocknet-guix:22.04 (FROM ubuntu:22.04 + Guix 1.5.0), glibc 2.35
+  # No host apt, no runner drift, no --disable-chroot.
+  # ──────────────────────────────────────────────────────────────
+  guix-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: blocknet
+          fetch-depth: 0
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+          echo "Ref: ${{ github.ref_name }} / ${{ inputs.version }}"
+          cat blocknet/configure.ac | grep CLIENT_VERSION -m1 || true
+
+      - name: Build Guix image (pinned, cached)
+        working-directory: blocknet
+        run: DOCKER_BUILDKIT=1 docker build -f contrib/guix/Dockerfile -t blocknet-guix:22.04 .
+
+      - name: Install macOS SDK (when darwin hosts requested)
+        if: ${{ inputs.os_filter == '' || contains(inputs.os_filter, 'm') }}
+        working-directory: blocknet
+        run: |
+          source contrib/guix/macos-sdk.env
+          SDK_ARCHIVE="$RUNNER_TEMP/$MACOS_SDK_NAME.tar"
+          if [ ! -d "depends/SDKs/$MACOS_SDK_NAME" ]; then
+            mkdir -p depends/SDKs
+            curl --location --fail "$MACOS_SDK_URL/$MACOS_SDK_NAME.tar" --output "$SDK_ARCHIVE"
+            printf '%s %s\n' "$MACOS_SDK_SHA256" "$SDK_ARCHIVE" | sha256sum --check
+            tar -C depends/SDKs -xf "$SDK_ARCHIVE"
+          fi
+          ls depends/SDKs/
+
+      - name: Guix build (all hosts, inside Docker, single log)
+        working-directory: blocknet
+        run: |
+          set -e
+          if [ -n "${{ inputs.os_filter }}" ] && [ "${{ inputs.os_filter }}" != "lwm" ]; then
+            FILTER="${{ inputs.os_filter }}"
+            HOSTS=""
+            case "$FILTER" in *l*) HOSTS="$HOSTS x86_64-linux-gnu aarch64-linux-gnu" ;; esac
+            case "$FILTER" in *w*) HOSTS="$HOSTS x86_64-w64-mingw32 aarch64-w64-mingw32" ;; esac
+            case "$FILTER" in *m*) HOSTS="$HOSTS x86_64-apple-darwin arm64-apple-darwin" ;; esac
+            export HOSTS="$(echo $HOSTS | xargs)"
+          else
+            export HOSTS="x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-mingw32 aarch64-w64-mingw32 arm64-apple-darwin x86_64-apple-darwin"
+          fi
+          echo "HOSTS=$HOSTS"
+          export FORCE_DIRTY_WORKTREE=1
+          export JOBS="$(nproc)"
+          export OUTDIR_BASE="$PWD/../blocknet-binaries"
+          mkdir -p "$OUTDIR_BASE"
+          echo "OUTDIR_BASE=$OUTDIR_BASE"
+          # Single log for whole matrix
+          set -o pipefail
+          ./contrib/guix/docker-run.sh "$HOSTS" 2>&1 | tee /tmp/guix-matrix.log
+          EXIT=${PIPESTATUS[0]}
+          echo "EXIT:$EXIT" | tee -a /tmp/guix-matrix.log
+          ls -R ../blocknet-binaries 2>&1 | head -n 100 || true
+          find ../blocknet-binaries -type f -exec sha256sum {} \; | tee SHA256SUMS || true
+          cat SHA256SUMS || true
+          exit $EXIT
+
+      - name: Stage SHA256SUMS and build log
+        run: |
+          # Stage everything into one root dir so the artifact layout is
+          # predictable after download (upload-artifact strips the LCA):
+          # release-staging/<host>/* , release-staging/SHA256SUMS
+          mkdir -p release-staging
+          cp -a blocknet-binaries/. release-staging/
+          find release-staging -type f ! -name SHA256SUMS.part -exec sha256sum {} \; | sort -k2 > release-staging/SHA256SUMS
+          cat release-staging/SHA256SUMS
+          cp /tmp/guix-matrix.log release-staging/guix-matrix.log
+
+      - name: Upload Guix artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: blocknet-guix-${{ steps.ver.outputs.version }}
+          path: release-staging
+          if-no-files-found: error
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────
+  # Docker multi-arch — FROM ubuntu:22.04 (glibc 2.35 floor), not bionic/24.04
+  # ──────────────────────────────────────────────────────────────
+  docker:
+    needs: guix-build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: blocknet
+
+      - name: Download Guix artifacts (into the build context)
+        uses: actions/download-artifact@v4
+        with:
+          name: blocknet-guix-${{ needs.guix-build.outputs.version }}
+          path: blocknet/blocknet-binaries
+
+      - name: List binaries
+        run: ls -R blocknet/blocknet-binaries 2>/dev/null || { echo "no binaries downloaded"; exit 1; }
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: blocknetdx/blocknet
+          tags: |
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          flavor: |
+            latest=auto
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_BLOCKNETDXIMG_USERNAME }}
+          password: ${{ secrets.ORG_BLOCKNETDXIMG_PASSWORD }}
+
+      - name: Login to GHCR (fallback)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: blocknet
+          file: ./blocknet/contrib/containers/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+  github-release:
+    needs: [guix-build, docker]
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 30
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: blocknet-guix-${{ needs.guix-build.outputs.version }}
+          path: artifacts
+
+      - name: Verify artifacts present
+        run: |
+          ls -R artifacts
+          test -f artifacts/SHA256SUMS || { echo "SHA256SUMS missing"; exit 1; }
+          count=$(find artifacts -name 'blocknet-*.tar.gz' -o -name 'blocknet-*.zip' -o -name 'blocknet-*.exe' -o -name 'blocknet-*.dmg' | wc -l)
+          echo "artifact count: $count"
+          test "$count" -gt 0 || { echo "no release artifacts found"; exit 1; }
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Blocknet Core ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/blocknet-*.tar.gz
+            artifacts/**/blocknet-*.zip
+            artifacts/**/blocknet-*.exe
+            artifacts/**/blocknet-*.dmg
+            artifacts/SHA256SUMS

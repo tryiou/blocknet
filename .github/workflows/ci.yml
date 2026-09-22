@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  push:
+    branches: [master, dev, "feat/*", "fix/*"]
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Canonical deterministic builds — all inside pinned Docker
+  # blocknet-guix:22.04 (FROM ubuntu:22.04@sha256 + Guix 1.5.0)
+  # No host pollution, no runner-image drift.
+  # Each HOST cross-compiled via Guix; smoke via qemu/wine inside same container.
+  # ──────────────────────────────────────────────────────────────
+  guix-matrix:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [x86_64-linux-gnu, aarch64-linux-gnu, x86_64-w64-mingw32, aarch64-w64-mingw32, arm64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install macOS SDK (darwin only)
+        if: contains(matrix.host, 'darwin')
+        run: |
+          source contrib/guix/macos-sdk.env
+          SDK_ARCHIVE="$RUNNER_TEMP/$MACOS_SDK_NAME.tar"
+          if [ ! -d "depends/SDKs/$MACOS_SDK_NAME" ]; then
+            mkdir -p depends/SDKs
+            curl --location --fail "$MACOS_SDK_URL/$MACOS_SDK_NAME.tar" --output "$SDK_ARCHIVE"
+            printf '%s %s\n' "$MACOS_SDK_SHA256" "$SDK_ARCHIVE" | sha256sum --check
+            tar -C depends/SDKs -xf "$SDK_ARCHIVE"
+          fi
+          ls depends/SDKs/
+      - name: Build Guix image (pinned, cached)
+        run: DOCKER_BUILDKIT=1 docker build -f contrib/guix/Dockerfile -t blocknet-guix:22.04 .
+      - name: Guix build ${{ matrix.host }}
+        run: |
+          mkdir -p blocknet-binaries
+          set -o pipefail
+          HOSTS=${{ matrix.host }} JOBS=$(nproc) ./contrib/guix/docker-run.sh ${{ matrix.host }} 2>&1 | tee /tmp/guix-${{ matrix.host }}.log
+          EXIT=${PIPESTATUS[0]}
+          echo "EXIT:$EXIT" | tee -a /tmp/guix-${{ matrix.host }}.log
+          ls -R blocknet-binaries 2>&1 | head -n 30 || true
+          cat /tmp/guix-${{ matrix.host }}.log | tail -n 30 || true
+          exit $EXIT
+      - name: Smoke check artifact
+        run: |
+          ls -lh blocknet-binaries/${{ matrix.host }}/ 2>&1 | head -n 20 || true
+          file blocknet-binaries/${{ matrix.host }}/* 2>&1 | head -n 20 || true
+          # Artifact required when the SDK was provisioned; without an SDK
+          # guix-build soft-skips darwin (upstream behavior), so tolerate that.
+          if [ -d "depends/SDKs" ] && [ -n "$(ls -A depends/SDKs 2>/dev/null)" ]; then
+            # compgen -G (glob-match) instead of `test -f <glob>`: when several
+            # files match (e.g. tarball + -debug/-unsigned variants), test -f
+            # gets >1 argument and usage-errors (exit 2), flagging real
+            # artifacts as missing.
+            compgen -G "blocknet-binaries/${{ matrix.host }}/*.tar.gz" > /dev/null \
+              || compgen -G "blocknet-binaries/${{ matrix.host }}/*.zip" > /dev/null \
+              || { echo "SDK present but no artifact for ${{ matrix.host }} — FAIL"; exit 1; }
+          else
+            echo "no artifact check for ${{ matrix.host }} (SDK not provisioned)"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: blocknet-${{ matrix.host }}
+          path: |
+            blocknet-binaries/${{ matrix.host }}/*
+            /tmp/guix-${{ matrix.host }}.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────
+  # Native sanity — single jammy job via Docker (not host apt)
+  # Keeps one non-Guix path for quick feedback, still inside container.
+  # ──────────────────────────────────────────────────────────────
+  native-sanity:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Native build inside pinned container
+        run: |
+          docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates ccache bison bsdmainutils curl > /dev/null
+            git config --global --add safe.directory /blocknet
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu > depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --enable-reduce-exports --with-gui=qt5 > configure.log 2>&1 || { tail -n 80 configure.log; tail -n 80 config.log; exit 1; }
+            make -j$(nproc) > make.log 2>&1; echo "make EXIT:$?"
+          '
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          tail -n 40 depends.log 2>/dev/null || true
+          tail -n 40 autogen.log 2>/dev/null || true
+          tail -n 40 configure.log 2>/dev/null || true
+          tail -n 60 make.log 2>/dev/null || true
+
+  # ──────────────────────────────────────────────────────────────
+  # Unit tests — build once natively in the pinned container and run
+  # make check (all unit suites incl. servicenode/xbridge/xrouter/
+  # governance/staking). Functional tests are covered by the
+  # functional-smoke job below.
+  # ──────────────────────────────────────────────────────────────
+  unit-tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build + run unit tests inside pinned container
+        run: |
+          docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
+            set -e
+            export LC_ALL=C.UTF-8
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 git ca-certificates bison bsdmainutils curl > /dev/null
+            git config --global --add safe.directory /blocknet
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
+            # NO_GUI: unit tests do not need Qt; keeps the job fast
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui > configure.log 2>&1 || { tail -n 80 configure.log; tail -n 80 config.log; exit 1; }
+            make -j$(nproc) > make.log 2>&1 || { tail -n 80 make.log; exit 1; }
+            echo "make EXIT:0"
+            make check > check.log 2>&1; echo "check EXIT:$?"
+          '
+      - name: Show test results
+        if: always()
+        run: |
+          tail -n 40 check.log 2>/dev/null || true
+          grep -rL "No errors detected" src/test/*.log src/wallet/test/*.log 2>/dev/null | while read -r f; do echo "=== FAILURES in $f ==="; tail -n 20 "$f"; done || true
+      - name: Show build logs on failure
+        if: failure()
+        run: |
+          tail -n 40 depends.log 2>/dev/null || true
+          tail -n 40 autogen.log 2>/dev/null || true
+          tail -n 40 configure.log 2>/dev/null || true
+          tail -n 60 make.log 2>/dev/null || true
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: unit-test-logs
+          path: |
+            check.log
+            src/test/*.log
+            src/wallet/test/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────
+  # Functional smoke — small, fast tests that stay under the regtest
+  # PoW ceiling (lastPOWBlock=125) and exercise the daemon's RPC/HTTP
+  # plumbing. The framework writes blocknet.conf (matching the daemon).
+  # ──────────────────────────────────────────────────────────────
+  functional-smoke:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build + run functional smoke subset inside pinned container
+        run: |
+          docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y --no-install-recommends build-essential libtool autotools-dev automake pkg-config python3 python3-pip git ca-certificates bison bsdmainutils curl > /dev/null
+            git config --global --add safe.directory /blocknet
+            pip3 install --quiet pyzmq 2>/dev/null || true
+            make -C depends -j$(nproc) HOST=x86_64-pc-linux-gnu NO_QT=1 > depends.log 2>&1; echo "depends EXIT:$?"
+            ./autogen.sh > autogen.log 2>&1 || { tail -n 80 autogen.log; exit 1; }
+            CONFIG_SITE=$PWD/depends/x86_64-pc-linux-gnu/share/config.site ./configure --prefix=/ --without-gui --disable-wallet > configure.log 2>&1 || { tail -n 80 configure.log; tail -n 80 config.log; exit 1; }
+            make -j$(nproc) src/blocknetd src/blocknet-cli > make.log 2>&1 || { tail -n 80 make.log; exit 1; }
+            echo "make EXIT:0"
+            test/functional/test_runner.py feature_help.py rpc_help.py feature_blocksdir.py interface_http.py > functional.log 2>&1 || { tail -n 100 functional.log; exit 1; }
+            echo "functional EXIT:0"
+          '
+      - name: Show functional results
+        if: always()
+        run: tail -n 60 functional.log 2>/dev/null || true
+      - name: Show build logs on failure
+        if: failure()
+        run: |
+          tail -n 40 depends.log 2>/dev/null || true
+          tail -n 40 autogen.log 2>/dev/null || true
+          tail -n 40 configure.log 2>/dev/null || true
+          tail -n 60 make.log 2>/dev/null || true
+      - name: Upload functional logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: functional-smoke-logs
+          path: functional.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  lint:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Shellcheck, yaml lint, and repo lint checks (inside container)
+        run: |
+          docker run --rm -v $PWD:/blocknet -w /blocknet ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y --no-install-recommends shellcheck yamllint python3 python3-pip git flake8 > /dev/null
+            git config --global --add safe.directory /blocknet
+            pip3 install --quiet codespell 2>/dev/null || true
+            yamllint .github/workflows/
+            shellcheck contrib/*.sh contrib/**/*.sh
+            # repo lint suite (whitespace, includes, shebangs, locale, filenames, ...)
+            test/lint/lint-all.sh
+          '

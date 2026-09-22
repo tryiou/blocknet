@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <rpc/blockchain.h>
+#include <algorithm>
 
 #include <amount.h>
 #include <base58.h>

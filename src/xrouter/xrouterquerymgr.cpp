@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xrouter/xrouterquerymgr.h>
+#include <algorithm>
 
 namespace xrouter {
 

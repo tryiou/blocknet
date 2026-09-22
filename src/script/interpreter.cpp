@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <script/interpreter.h>
+#include <algorithm>
 
 #include <crypto/ripemd160.h>
 #include <crypto/sha1.h>

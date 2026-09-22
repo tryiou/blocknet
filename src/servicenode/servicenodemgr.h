@@ -6,6 +6,8 @@
 #define BLOCKNET_SERVICENODE_SERVICENODEMGR_H
 
 #include <amount.h>
+#include <algorithm>
+#include <iterator>
 #include <key_io.h>
 #include <net.h>
 #include <netmessagemaker.h>
@@ -284,8 +286,15 @@ public:
             }
 
             addressId = boost::get<CKeyID>(dest);
+            uint32_t tipHeight{0};
+            uint256 tipHash;
+            {
+                LOCK(cs_main); // chainActive reads
+                tipHeight = chainActive.Height();
+                tipHash = chainActive.Tip()->GetBlockHash();
+            }
             const auto & sighash = sn::ServiceNode::CreateSigHash(snodePubKey, tier, addressId, collateral,
-                                                                  chainActive.Height(), chainActive.Tip()->GetBlockHash());
+                                                                  tipHeight, tipHash);
 
             // Sign the servicenode with the collateral's private key
             CKey sign;
@@ -297,8 +306,15 @@ public:
             }
 
         } else { // OPEN tier
+            uint32_t tipHeight{0};
+            uint256 tipHash;
+            {
+                LOCK(cs_main); // chainActive reads
+                tipHeight = chainActive.Height();
+                tipHash = chainActive.Tip()->GetBlockHash();
+            }
             const auto & sighash = sn::ServiceNode::CreateSigHash(snodePubKey, tier, addressId, collateral,
-                                                                  chainActive.Height(), chainActive.Tip()->GetBlockHash());
+                                                                  tipHeight, tipHash);
 
             if (!key.SignCompact(sighash, sig) || sig.empty()) { // sign with snode pubkey
                 const auto errMsg = strprintf("service node registration failed, bad signature, is the servicenode.conf populated? %s", address);
@@ -307,8 +323,14 @@ public:
             }
         }
 
-        ServiceNode snode(snodePubKey, tier, addressId, collateral, chainActive.Height(),
-                chainActive.Tip()->GetBlockHash(), sig);
+        uint32_t tipHeight{0};
+        uint256 tipHash;
+        {
+            LOCK(cs_main); // chainActive reads
+            tipHeight = chainActive.Height();
+            tipHash = chainActive.Tip()->GetBlockHash();
+        }
+        ServiceNode snode(snodePubKey, tier, addressId, collateral, tipHeight, tipHash, sig);
         auto snodePtr = addSn(snode);
         if (!snodePtr) {
             const std::string errMsg = "service node registration failed";
@@ -405,9 +427,10 @@ public:
      */
     const ServiceNodePing & getPing(const CPubKey & snodePubKey) {
         LOCK(mu);
-        if (!pings.count(snodePubKey))
-            return std::move(ServiceNodePing{});
-        return pings[snodePubKey];
+        auto it = pings.find(snodePubKey);
+        if (it == pings.end())
+            return nullPing;
+        return it->second;
     }
 
     /**
@@ -859,12 +882,16 @@ protected:
      * @return
      */
     ServiceNodePtr addSn(const ServiceNode & snode, const bool checkValid = true, const bool staleCheck = true) {
+        // isValid() reaches cs_main (GetTxFunc/IsServiceNodeBlockValidFunc) and must
+        // run outside mu (non-recursive cs_main, see processValidationBlock).
         if (checkValid && !snode.isValid(GetTxFunc, IsServiceNodeBlockValidFunc, staleCheck))
             return nullptr;
-        removeSnWithCollateral(snode);
         auto ptr = std::make_shared<ServiceNode>(snode);
         {
+            // Single critical section: dropping mu between the collateral-dedup and the
+            // insert would let a concurrent addSn race the same collateral in.
             LOCK(mu);
+            removeSnWithCollateralLocked(ptr);
             snodes[ptr->getSnodePubKey()] = ptr;
         }
         return ptr;
@@ -897,11 +924,8 @@ protected:
      * @return
      */
     bool removeSn(const CPubKey & snodePubKey) {
-        if (!hasSn(snodePubKey))
-            return false;
         LOCK(mu);
-        snodes.erase(snodePubKey);
-        return true;
+        return snodes.erase(snodePubKey) > 0;
     }
 
     /**
@@ -923,8 +947,14 @@ protected:
         LOCK(mu);
         if (seenPackets.count(hash))
             return true; // already seen
-        if (seenPackets.size() > 350000)
-            seenPackets.clear(); // mem mgmt, ~12MB (32bytes * 350k)
+        if (seenPackets.size() > 350000) {
+            // mem mgmt, ~12MB (32bytes * 350k). Trim the oldest portion
+            // instead of clear(): bulk-wiping would drop all replay
+            // protection at once and allow a replay burst.
+            auto it = seenPackets.begin();
+            std::advance(it, static_cast<long>(seenPackets.size() / 2));
+            seenPackets.erase(seenPackets.begin(), it);
+        }
         seenPackets.insert(hash);
         return false;
     }
@@ -949,15 +979,20 @@ protected:
      */
     void removeSnWithCollateral(const ServiceNode & snode) {
         LOCK(mu);
+        removeSnWithCollateralLocked(std::make_shared<ServiceNode>(snode));
+    }
+
+    // Caller must hold mu.
+    void removeSnWithCollateralLocked(const ServiceNodePtr & snode) {
         std::map<COutPoint, ServiceNodePtr> utxos;
         for (const auto & item : snodes) {
             const auto & s = item.second;
-            if (s->getSnodePubKey() != snode.getSnodePubKey()) { // exclude specified snode
+            if (s->getSnodePubKey() != snode->getSnodePubKey()) { // exclude specified snode
                 for (const auto & utxo : s->getCollateral())
                     utxos[utxo] = s;
             }
         }
-        for (const auto & utxo : snode.getCollateral()) {
+        for (const auto & utxo : snode->getCollateral()) {
             if (utxos.count(utxo) && snodes.count(utxos[utxo]->getSnodePubKey()))
                 snodes.erase(utxos[utxo]->getSnodePubKey());
         }
@@ -1224,23 +1259,34 @@ protected:
             }
         }
 
-        // Check that existing snodes are valid
+        // Check that existing snodes are valid. isValid() may acquire cs_main
+        // (via GetTxFunc/IsServiceNodeBlockValidFunc), so it must NOT be called
+        // while holding mu: snapshot the work under mu, validate outside mu,
+        // then apply the results under mu.
+        std::vector<std::pair<ServiceNodePtr, bool>> toRevalidate; // snode, wasMarkedInvalid
         {
             LOCK(mu);
             for (auto & item : snodes) {
                 auto snode = item.second;
+                bool spentCollateral = false;
                 for (const auto & collateral : snode->getCollateral()) {
                     if (spent.count(collateral)) {
                         snode->markInvalid(true, blockNumber);
+                        spentCollateral = true;
                         break;
                     }
                 }
                 // Re-validate snodes on potential reorg (on block disconnected)
-                if (!connected) {
-                    snode->markInvalid(false); // reset state before is valid check
-                    snode->markInvalid(!snode->isValid(GetTxFunc, IsServiceNodeBlockValidFunc));
-                }
+                if (!connected)
+                    toRevalidate.emplace_back(snode, spentCollateral);
             }
+        }
+        for (const auto & entry : toRevalidate) {
+            const auto & snode = entry.first;
+            const bool valid = snode->isValid(GetTxFunc, IsServiceNodeBlockValidFunc);
+            LOCK(mu);
+            snode->markInvalid(false); // reset state before is valid check
+            snode->markInvalid(!valid);
         }
     }
 
@@ -1251,6 +1297,11 @@ protected:
     std::set<uint256> seenPackets;
     std::set<ServiceNodeConfigEntry> snodeEntries;
     std::vector<int> seenBlocks;
+
+private:
+    // Returned by getPing() when no ping exists (avoids returning a
+    // reference to a temporary).
+    static const ServiceNodePing nullPing;
 };
 
 }

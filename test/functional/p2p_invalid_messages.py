@@ -155,9 +155,9 @@ class InvalidMessagesTest(BitcoinTestFramework):
         with self.nodes[0].assert_debug_log(['ProcessMessages(badmsg, 2 bytes): CHECKSUM ERROR expected 78df0a04 was ffffffff']):
             msg = conn.build_message(msg_unrecognized(str_data="d"))
             cut_len = (
-                4 +  # magic
-                12 +  # command
-                4  #len
+                4  # magic
+                + 12  # command
+                + 4  # len
             )
             # modify checksum
             msg = msg[:cut_len] + b'\xff' * 4 + msg[cut_len + 4:]
@@ -170,8 +170,8 @@ class InvalidMessagesTest(BitcoinTestFramework):
         with self.nodes[0].assert_debug_log(['']):
             msg = conn.build_message(msg_unrecognized(str_data="d"))
             cut_len = (
-                4 +  # magic
-                12  # command
+                4  # magic
+                + 12  # command
             )
             # modify len to MAX_SIZE + 1
             msg = msg[:cut_len] + struct.pack("<I", 0x02000000 + 1) + msg[cut_len + 4:]
@@ -203,9 +203,9 @@ class InvalidMessagesTest(BitcoinTestFramework):
 
         # Replace the correct data size in the message with an incorrect one.
         raw_msg_with_wrong_size = (
-            raw_msg[:num_header_bytes_before_size] +
-            bad_size_bytes +
-            raw_msg[(num_header_bytes_before_size + len(bad_size_bytes)):]
+            raw_msg[:num_header_bytes_before_size]
+            + bad_size_bytes
+            + raw_msg[(num_header_bytes_before_size + len(bad_size_bytes)):]
         )
         assert len(raw_msg) == len(raw_msg_with_wrong_size)
 

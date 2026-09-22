@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <wallet/walletdb.h>
+#include <algorithm>
 
 #include <consensus/tx_verify.h>
 #include <consensus/validation.h>

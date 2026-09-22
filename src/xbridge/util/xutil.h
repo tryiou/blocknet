@@ -18,10 +18,6 @@
 
 #include <string>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
-
 #include <boost/date_time/posix_time/ptime.hpp>
 
 #define BEGIN(a) ((char*)&(a))
@@ -82,6 +78,33 @@ namespace xbridge
     double xBridgeValueFromAmount(CAmount amount);
     CAmount xBridgeIntFromReal(double val);
     CAmount xBridgeAmountFromReal(double val);
+    std::string xBridgeAmountToString(CAmount descrAmount);
+    // Exact integer conversion from descr units (TransactionDescr::COIN = 1e6
+    // per coin) to wallet base units (walletCoin per coin, usually 1e8).
+    // Pure integer math, no double involved.
+    CAmount xBridgeDescrToSats(CAmount descrAmount, uint64_t walletCoin);
+    // Convert a wallet coin-denominated double (e.g. UTXO amount, minTxFee)
+    // to integer base units, rounding to nearest. Safe because wallet RPC
+    // values carry at most 8 decimals and magnitudes are far below 2^53.
+    CAmount xBridgeWalletSatsFromReal(double coinAmount, uint64_t walletCoin);
+    bool xBridgeFundsSufficient(CAmount inDescr, CAmount requirementDescr);
+    // Redeem-retry decision for the ConfirmA/ConfirmB payTx blocks. errCode is
+    // the callee contract: 0 = pre-broadcast permanent failure (bad secret:
+    // counterparty misbehaving; nothing broadcast yet),
+    // RPC_VERIFY_ERROR / RPC_CLIENT_NOT_CONNECTED = transient (dependency not
+    // yet visible, wallet down, deterministic build fail that cannot be
+    // distinguished from transient; bounded re-drive, never fast-cancel),
+    // anything else = send-stage failure with uncertain broadcast state.
+    // Every `return false` path in the callee sets errCode explicitly
+    // (secret-missing sets 0, build failures set a transient code), so 0 is
+    // never an accidental default. Transient retries are bounded by
+    // tries/maxTries and the watching flag; permanent pre-broadcast cancels
+    // via the standard abort path; uncertain send failures expire to the
+    // watch loop (cancel is unsafe once the pay tx may be out). Pre-secret
+    // expiry must keep the packet alive via processLater (the watch loop only
+    // recovers post-secret orders).
+    enum class RedeemRetryClass { Retry, CancelOrder, Expire };
+    RedeemRetryClass xBridgeRedeemRetryClass(int32_t errCode, uint32_t tries, uint32_t maxTries, bool doneWatching);
     std::string xBridgeStringValueFromPrice(double price);
     std::string xBridgeStringValueFromPrice(double price, uint64_t denomination);
     std::string xBridgeStringValueFromAmount(CAmount amount);
@@ -140,9 +163,9 @@ namespace xbridge
      * @param statusCode - error code
      * @param function - nome of called function
      * @param message - additional error description
-     * @return  json_spirit object with error description
+     * @return  UniValue object with error description
      */
-     json_spirit::Object makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message = "");
+     UniValue makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message = "");
 
     void LogOrderMsg(const std::string & orderId, const std::string & msg, const std::string & func);
     void LogOrderMsg(UniValue o, const std::string & msg, const std::string & func);

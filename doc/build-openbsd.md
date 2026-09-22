@@ -2,7 +2,7 @@ OpenBSD build guide
 ======================
 (updated for OpenBSD 6.4)
 
-This guide describes how to build bitcoind and command-line utilities on OpenBSD.
+This guide describes how to build blocknetd and command-line utilities on OpenBSD.
 
 OpenBSD is most commonly used as a server OS, so this guide does not contain instructions for building the GUI.
 
@@ -15,14 +15,14 @@ Run the following as root to install the base dependencies for building:
 pkg_add git gmake libevent libtool boost
 pkg_add autoconf # (select highest version, e.g. 2.69)
 pkg_add automake # (select highest version, e.g. 1.16)
-pkg_add python # (select highest version, e.g. 3.6)
+pkg_add python # (select a current version; 3.10 or newer is required for the test suite)
 
-git clone https://github.com/bitcoin/bitcoin.git
+git clone https://github.com/blocknetdx/blocknet.git
 ```
 
 See [dependencies.md](dependencies.md) for a complete overview.
 
-**Important**: From OpenBSD 6.2 onwards a C++11-supporting clang compiler is
+**Important**: A C++17-supporting clang compiler is
 part of the base image, and while building it is necessary to make sure that this
 compiler is used and not ancient g++ 4.2.1. This is done by appending
 `CC=cc CXX=c++` to configuration commands. Mixing different compilers
@@ -48,7 +48,7 @@ from the root of the repository. Then set `BDB_PREFIX` for the next section:
 export BDB_PREFIX="$PWD/db4"
 ```
 
-### Building Bitcoin Core
+### Building Blocknet Core
 
 **Important**: use `gmake`, not `make`. The non-GNU `make` will exit with a horrible error.
 
@@ -95,7 +95,7 @@ The standard ulimit restrictions in OpenBSD are very strict:
     data(kbytes)         1572864
 
 This is, unfortunately, in some cases not enough to compile some `.cpp` files in the project,
-(see issue [#6658](https://github.com/bitcoin/bitcoin/issues/6658)).
+
 If your user is in the `staff` group the limit can be raised with:
 
     ulimit -d 3000000

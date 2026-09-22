@@ -267,7 +267,7 @@ def get_rpc_proxy(url, node_number, timeout=None, coveragedir=None):
     return coverage.AuthServiceProxyWrapper(proxy, coverage_logfile)
 
 def p2p_port(n):
-    assert(n <= MAX_NODES)
+    assert (n <= MAX_NODES)
     return PORT_MIN + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 def rpc_port(n):
@@ -292,7 +292,7 @@ def initialize_datadir(dirname, n):
     datadir = get_datadir_path(dirname, n)
     if not os.path.isdir(datadir):
         os.makedirs(datadir)
-    with open(os.path.join(datadir, "bitcoin.conf"), 'w', encoding='utf8') as f:
+    with open(os.path.join(datadir, "blocknet.conf"), 'w', encoding='utf8') as f:
         f.write("regtest=1\n")
         f.write("[regtest]\n")
         f.write("port=" + str(p2p_port(n)) + "\n")
@@ -311,15 +311,15 @@ def get_datadir_path(dirname, n):
     return os.path.join(dirname, "node" + str(n))
 
 def append_config(datadir, options):
-    with open(os.path.join(datadir, "bitcoin.conf"), 'a', encoding='utf8') as f:
+    with open(os.path.join(datadir, "blocknet.conf"), 'a', encoding='utf8') as f:
         for option in options:
             f.write(option + "\n")
 
 def get_auth_cookie(datadir):
     user = None
     password = None
-    if os.path.isfile(os.path.join(datadir, "bitcoin.conf")):
-        with open(os.path.join(datadir, "bitcoin.conf"), 'r', encoding='utf8') as f:
+    if os.path.isfile(os.path.join(datadir, "blocknet.conf")):
+        with open(os.path.join(datadir, "blocknet.conf"), 'r', encoding='utf8') as f:
             for line in f:
                 if line.startswith("rpcuser="):
                     assert user is None  # Ensure that there is only one rpcuser line
@@ -426,7 +426,7 @@ def gather_inputs(from_node, amount_needed, confirmations_required=1):
     """
     Return a random set of unspent txouts that are enough to pay amount_needed
     """
-    assert(confirmations_required >= 0)
+    assert (confirmations_required >= 0)
     utxo = from_node.listunspent(confirmations_required)
     random.shuffle(utxo)
     inputs = []
@@ -504,7 +504,7 @@ def create_confirmed_utxos(fee, node, count):
         node.generate(1)
 
     utxos = node.listunspent()
-    assert(len(utxos) >= count)
+    assert (len(utxos) >= count)
     return utxos
 
 # Create large OP_RETURN txouts that can be appended to a transaction

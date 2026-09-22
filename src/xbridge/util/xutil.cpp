@@ -6,12 +6,16 @@
 //*****************************************************************************
 
 #include <xbridge/util/xutil.h>
+#include <rpc/protocol.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xbridge/xbridgetransactiondescr.h>
 
 #include <amount.h>
 
 #include <ctime>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -24,8 +28,9 @@
 #include <boost/archive/iterators/ostream_iterator.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/time_facet.hpp>
-#include <boost/locale.hpp>
 #include <boost/numeric/conversion/cast.hpp>
+// NOTE: boost/locale.hpp intentionally NOT included; mb_string() is
+// self-contained (see below) so libboost_locale is not required.
 
 #ifndef WIN32
 #include <execinfo.h>
@@ -35,8 +40,6 @@
 //*****************************************************************************
 namespace xbridge
 {
-
-using namespace json_spirit;
 std::locale loc;
 
 //******************************************************************************
@@ -103,7 +106,57 @@ std::string mb_string(std::string const &s)
 //******************************************************************************
 std::string mb_string(std::wstring const &s)
 {
-    return boost::locale::conv::utf_to_utf<char>(s);
+    // Self-contained wchar_t -> UTF-8 converter (replaces
+    // boost::locale::conv::utf_to_utf<char>, dropping the boost_locale
+    // link dependency). Handles both UTF-32 (Linux/macOS) and UTF-16
+    // with surrogate pairs (Windows); invalid sequences become U+FFFD
+    // instead of throwing.
+    std::string out;
+    out.reserve(s.size());
+    auto push_utf8 = [&out](uint32_t cp) {
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    };
+    for (size_t i = 0; i < s.size();) {
+        uint32_t cp;
+        if (sizeof(wchar_t) > 2) {
+            // UTF-32: lone surrogates are invalid.
+            cp = static_cast<uint32_t>(s[i++]);
+            if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;
+            if (cp > 0x10FFFF) cp = 0xFFFD;
+        } else {
+            // UTF-16: combine surrogate pairs.
+            uint32_t hi = static_cast<uint32_t>(s[i++]);
+            if (hi >= 0xD800 && hi <= 0xDBFF && i < s.size()) {
+                uint32_t lo = static_cast<uint32_t>(s[i]);
+                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                    ++i;
+                    cp = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
+                } else {
+                    cp = 0xFFFD;
+                }
+            } else if (hi >= 0xDC00 && hi <= 0xDFFF) {
+                cp = 0xFFFD;
+            } else {
+                cp = hi;
+            }
+        }
+        push_utf8(cp);
+    }
+    return out;
 }
 
 //*****************************************************************************
@@ -238,6 +291,71 @@ CAmount xBridgeIntFromReal(double utxo_amount) {
 
 CAmount xBridgeAmountFromReal(double val) {
     return xBridgeIntFromReal(val);
+}
+
+std::string xBridgeAmountToString(CAmount descrAmount) {
+    // Exact decimal from integer descr units (TransactionDescr::COIN = 1e6
+    // units per coin): six fractional digits, no double involved. The result
+    // never exceeds six decimals, so the wallet's ParseFixedPoint(8) always
+    // accepts it — unlike setprecision(16) serialization of the equivalent
+    // double, which can emit 18 decimals and is rejected with code -3
+    // "Invalid amount" (live crBadADepositTx on an exact-fit order).
+    const bool neg = descrAmount < 0;
+    // INT64_MIN-safe negation: -(n+1)+1 avoids signed overflow on negation.
+    const uint64_t n = neg ? static_cast<uint64_t>(-(descrAmount + 1)) + 1u
+                           : static_cast<uint64_t>(descrAmount);
+    std::ostringstream oss;
+    if (neg)
+        oss << '-';
+    oss << (n / 1000000) << '.' << std::setw(6) << std::setfill('0') << (n % 1000000);
+    return oss.str();
+}
+
+CAmount xBridgeDescrToSats(CAmount descrAmount, uint64_t walletCoin) {
+    // Pure integer: descr units are 1e6 per coin, wallet units are
+    // walletCoin per coin. Rounds toward zero; inputs are non-negative on
+    // the swap path (refund/payment), negative only in tests.
+    return descrAmount * static_cast<CAmount>(walletCoin) / xbridge::TransactionDescr::COIN;
+}
+
+CAmount xBridgeWalletSatsFromReal(double coinAmount, uint64_t walletCoin) {
+    // Nearest-sat rounding (not truncation): wallet RPC doubles carry at
+    // most 8 decimals, so llround recovers the exact integer for all
+    // realistic magnitudes (< 2^53 base units).
+    return static_cast<CAmount>(std::llround(coinAmount * static_cast<double>(walletCoin)));
+}
+
+bool xBridgeFundsSufficient(CAmount inDescr, CAmount requirementDescr) {
+    // Canonical funding predicate: pure integer comparison in
+    // TransactionDescr::COIN (1e6) descr units. Both the loop early-exit gate
+    // and the final gate in processTransactionCreateA use it, so the two
+    // definitions cannot disagree. The predicate itself does no double
+    // conversion: callers pass the already-accumulated CAmount ledger
+    // (cinAmount). That ledger is summed from wallet doubles upstream, but
+    // the +1e-8 pad in xBridgeIntFromReal absorbs sub-descr-unit float dust
+    // (far below one descr unit), so integer-exact ties compare correctly.
+    // This replaces
+    // the former padded-double form (inAmount < xBridgeValueFromAmount(req)),
+    // whose unconditional +1e-8 pad deterministically rejected exact ties
+    // (10000 == 9800+100+100) with crNoMoney.
+    return inDescr >= requirementDescr;
+}
+
+RedeemRetryClass xBridgeRedeemRetryClass(int32_t errCode, uint32_t tries, uint32_t maxTries, bool doneWatching) {
+    // Pre-broadcast permanent failure (bad secret: counterparty misbehaving).
+    // Nothing was broadcast, so the standard cancel abort path (refunds)
+    // applies unconditionally.
+    if (errCode == 0)
+        return RedeemRetryClass::CancelOrder;
+    // Transient: dependency not yet visible or wallet down. Bounded re-drive;
+    // the watch loop owns recovery beyond the budget.
+    if (!doneWatching && tries < maxTries &&
+        (errCode == RPCErrorCode::RPC_VERIFY_ERROR ||
+         errCode == RPCErrorCode::RPC_CLIENT_NOT_CONNECTED))
+        return RedeemRetryClass::Retry;
+    // Anything else (send-stage failures with uncertain broadcast state):
+    // expire to the watch loop. Cancel is unsafe once the pay tx may be out.
+    return RedeemRetryClass::Expire;
 }
 
 bool xBridgeValidCoin(const std::string coin)
@@ -381,12 +499,12 @@ bool xBridgePartialOrderDriftCheck(CAmount makerSource, CAmount makerDest, CAmou
     return success;
 }
 
-json_spirit::Object makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message)
+UniValue makeError(const xbridge::Error statusCode, const std::string &function, const std::string &message)
 {
-    Object error;
-    error.emplace_back(Pair("error",xbridge::xbridgeErrorText(statusCode,message)));
-    error.emplace_back(Pair("code", statusCode));
-    error.emplace_back(Pair("name",function));
+    UniValue error(UniValue::VOBJ);
+    error.pushKV("error",xbridge::xbridgeErrorText(statusCode,message));
+    error.pushKV("code", static_cast<int>(statusCode));
+    error.pushKV("name",function);
     return  error;
 }
 

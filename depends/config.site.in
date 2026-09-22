@@ -36,6 +36,11 @@ fi
 if test x@host_os@ = xdarwin; then
   BREW=no
   PORT=no
+  # lld/ld64 print a verbose warning that trips libtool's -single_module
+  # probe, which would select a broken `$CC -r` link-line for shared libs
+  # (same override as configure.ac; this copy covers depends packages'
+  # own configures, e.g. bdb).
+  lt_cv_apple_cc_single_mod=yes
 fi
 
 if test x@host_os@ = xmingw32; then

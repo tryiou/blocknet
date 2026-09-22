@@ -7,15 +7,13 @@
 #include <rpc/protocol.h>
 
 #include <string>
+#include <limits>
 #include <regex>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_utils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 
-using namespace json_spirit;
 
 #ifdef _WIN32
 #include <objbase.h>
@@ -66,6 +64,14 @@ std::string walletCommandKey(const std::string & wallet) {
 std::string fqServiceToUrl(std::string fqservice) {
     boost::replace_all(fqservice, "::", "/");
     return std::move("/" + fqservice);
+}
+bool isShellSafe(const std::string & s) {
+    static const std::string safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:+=@%,";
+    return !s.empty() && s.find_first_not_of(safe) == std::string::npos;
+}
+bool isShellQuotedSafe(const std::string & s) {
+    // Characters that can escape or terminate a double-quoted shell string
+    return s.find_first_of("\"`$\\") == std::string::npos;
 }
 bool removeNamespace(const std::string & service, std::string & result) {
     auto namespaces = std::vector<std::string>{xr, xrs};
@@ -173,8 +179,32 @@ bool is_hex(const std::string & hex)
 }
 
 bool hextodec(const std::string & hex, unsigned int & n) {
-    n = std::stoul(hex, nullptr, 16);
-    return true;
+    // Strict hex validation: stoul(base 16) accepts a "0x" prefix and stops
+    // at the first invalid char ("0xZZ" -> 0), so require a non-empty,
+    // fully-consumed hex string.
+    const std::string digits = (hex.size() > 1 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
+        ? hex.substr(2) : hex;
+    if (digits.empty())
+        return false;
+    for (const char c : digits) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!ok)
+            return false;
+    }
+    try {
+        size_t consumed{0};
+        const auto v = std::stoul(hex, &consumed, 16);
+        if (consumed != hex.size())
+            return false; // trailing garbage
+        if (v > std::numeric_limits<unsigned int>::max())
+            return false; // out of range
+        n = static_cast<unsigned int>(v);
+        return true;
+    } catch (const std::invalid_argument &) {
+        return false; // not a hex number
+    } catch (const std::out_of_range &) {
+        return false; // too large
+    }
 }
 
 // We need this to allow zero CAmount in xrouter
@@ -187,85 +217,6 @@ CAmount to_amount(double val)
     if (!MoneyRange(nAmount))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount");
     return nAmount;
-}
-
-Object form_reply(const std::string & uuid, const Value & reply) {
-    Object ret;
-
-    if (reply.type() == array_type) {
-        ret.emplace_back("reply", reply);
-        if (!uuid.empty())
-            ret.emplace_back("uuid", uuid);
-        return ret;
-    }
-
-    if (reply.type() != obj_type) {
-        ret.emplace_back("reply", reply);
-        if (!uuid.empty())
-            ret.emplace_back("uuid", uuid);
-        return ret;
-    }
-
-    ret = reply.get_obj();
-
-    Value rply = find_value(ret, "reply");
-    Value result = find_value(ret, "result");
-    const Value error_val = find_value(ret, "error");
-    const Value code_val = find_value(ret, "code");
-    const Value uuid_val = find_value(ret, "uuid");
-
-    if (rply.type() == null_type && result.type() == null_type && error_val.type() == null_type) {
-        ret = Object();
-        ret.emplace_back("reply", reply.get_obj());
-        if (error_val.type() != null_type)
-            ret.emplace_back("error", "Bad request");
-        if (code_val.type() != null_type)
-            ret.emplace_back("code", code_val);
-        if (uuid_val.type() != null_type)
-            ret.emplace_back("uuid", uuid_val);
-        rply = find_value(ret, "reply");
-        result = Value();
-    }
-
-    // Display result/reply
-    if (result.type() != null_type && rply.type() == null_type) {
-        for (int i = 0; i < ret.size(); ++i) {
-            const auto & item = ret[i];
-            if (item.name_ == std::string{"result"}) {
-                ret.erase(ret.begin()+i);
-                break;
-            }
-        }
-        ret.insert(ret.begin(), Pair("reply", result));
-    }
-
-    // Display errors
-    if (error_val.type() != null_type) {
-        if (code_val.type() == null_type) {
-            // insert after error
-            for (int i = 0; i < ret.size(); ++i) {
-                const auto & item = ret[i];
-                if (item.name_ == std::string{"error"}) {
-                    ret.insert(ret.begin()+i, Pair("code", xrouter::INTERNAL_SERVER_ERROR));
-                    break;
-                }
-            }
-        }
-    }
-
-    // Display uuid if necessary
-    if (!uuid.empty()) {
-        for (int i = 0; i < ret.size(); ++i) {
-            const auto & item = ret[i];
-            if (item.name_ == std::string{"uuid"}) {
-                ret.erase(ret.begin()+i);
-                break;
-            }
-        }
-        ret.emplace_back("uuid", uuid);
-    }
-
-    return ret;
 }
 
 UniValue form_reply(const std::string & uuid, const UniValue & reply) {
@@ -337,17 +288,6 @@ UniValue form_reply(const std::string & uuid, const UniValue & reply) {
     return rret;
 }
 
-Object form_reply(const std::string & uuid, const std::string & reply)
-{
-    Value reply_val;
-    try {
-        read_string(reply, reply_val);
-    } catch (...) {
-        reply_val = Value(reply);
-    }
-    if (reply_val.type() == null_type)
-        reply_val = Value(reply);
-    return form_reply(uuid, reply_val);
-}
+
 
 } // namespace xrouter

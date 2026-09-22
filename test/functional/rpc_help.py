@@ -33,7 +33,11 @@ class HelpRpcTest(BitcoinTestFramework):
         # command titles
         titles = [line[3:-3] for line in node.help().splitlines() if line.startswith('==')]
 
-        components = ['Blockchain', 'Control', 'Generating', 'Mining', 'Network', 'Rawtransactions', 'Util']
+        # Blocknet RPC surface (subset of titles is fine, the test asserts
+        # the exact set present in this build configuration)
+        components = ['Blockchain', 'Control', 'Generating', 'Governance', 'Mining',
+                      'Network', 'Rawtransactions', 'Servicenode', 'Util',
+                      'XBridge', 'XRouter']
 
         if self.is_wallet_compiled():
             components.append('Wallet')

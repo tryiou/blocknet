@@ -3,12 +3,12 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xbridge/util/xseries.h>
+#include <algorithm>
 
 #include <chain.h>
 #include <key_io.h>
 #include <validation.h>
 
-#include <json/json_spirit_reader_template.h>
 
 //******************************************************************************
 //******************************************************************************

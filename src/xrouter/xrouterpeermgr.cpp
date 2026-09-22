@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xrouter/xrouterpeermgr.h>
+#include <algorithm>
 
 #include <chainparams.h>
 #include <consensus/validation.h>

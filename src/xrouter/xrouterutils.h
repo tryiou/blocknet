@@ -14,10 +14,7 @@
 #include <string>
 #include <cstdint>
 
-#include <json/json_spirit.h>
 #include <univalue.h>
-
-using namespace json_spirit;
 
 namespace xrouter
 {
@@ -43,6 +40,17 @@ std::string walletCommandKey(const std::string & wallet, const std::string & com
  * @return
  */
 std::string walletCommandKey(const std::string & wallet);
+/**
+ * Returns true if the string contains only characters that are safe to
+ * interpolate into a shell command without quoting
+ * (alphanumerics and "_", "-", ".", "/", ":", "+", "=", ",", "@", "%").
+ */
+bool isShellSafe(const std::string & s);
+/**
+ * Returns true if the string contains no characters that can break out of
+ * double quotes in a shell command ("`, $, \) — used for quoted arguments.
+ */
+bool isShellQuotedSafe(const std::string & s);
 /**
  * Helper to transform a fully qualified service (e.g. xrs::CustomPlugin) to a url (e.g. xrs/CustomPlugin).
  * @param fqservice
@@ -106,11 +114,11 @@ XRouterReply CallXRouterUrlSSL(const std::string & host, const int & port, const
 // Network and RPC interface
 std::string CallCMD(const std::string & cmd, int & exit);
 std::string CallRPC(const std::string & rpcip, const std::string & rpcport,
-                           const std::string & strMethod, const Array & params,
+                           const std::string & strMethod, const UniValue & params,
                            const std::string & jsonver="", const std::string & contenttype="");
 std::string CallRPC(const std::string & rpcuser, const std::string & rpcpasswd,
                            const std::string & rpcip, const std::string & rpcport,
-                           const std::string & strMethod, const Array & params,
+                           const std::string & strMethod, const UniValue & params,
                            const std::string & jsonver="", const std::string & contenttype="");
 
 // Payment functions
@@ -127,8 +135,6 @@ bool is_hash(const std::string & hash);
 bool is_hex(const std::string & hex);
 bool hextodec(const std::string & hex, unsigned int & n);
 std::string generateUUID();
-Object form_reply(const std::string & uuid, const Value & reply);
-Object form_reply(const std::string & uuid, const std::string & reply);
 UniValue form_reply(const std::string & uuid, const UniValue & reply);
 
 } // namespace

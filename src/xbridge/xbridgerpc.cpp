@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <xbridge/xbridgerpc.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xbridge/util/logger.h>
 #include <xbridge/util/xutil.h>
@@ -16,9 +18,6 @@
 
 #include <stdio.h>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
@@ -34,7 +33,6 @@
 namespace rpc
 {
 
-using namespace json_spirit;
 using namespace std;
 using namespace boost;
 using namespace boost::asio;
@@ -58,13 +56,13 @@ std::vector<unsigned char> toXAddr(const std::string & addr)
 
 //******************************************************************************
 //******************************************************************************
-string JSONRPCRequest(const string& strMethod, const Array& params, const Value& id)
+string JSONRPCRequest(const string& strMethod, const UniValue& params, const UniValue& id)
 {
-    Object request;
-    request.push_back(Pair("method", strMethod));
-    request.push_back(Pair("params", params));
-    request.push_back(Pair("id", id));
-    return write_string(Value(request), json_spirit::none, 6) + "\n";
+    UniValue request(UniValue::VOBJ);
+    request.pushKV("method", strMethod);
+    request.pushKV("params", params);
+    request.pushKV("id", id);
+    return request.write() + "\n";
 }
 
 //******************************************************************************
@@ -177,36 +175,36 @@ bool listaccounts(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         // LOG() << "rpc call <listaccounts>";
 
-        Array params;
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listaccounts", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listaccounts", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object acclist = result.get_obj();
-        for (auto nameval : acclist)
+        UniValue acclist = result.get_obj();
+        for (const auto & name : acclist.getKeys())
         {
-            if (!nameval.name_.empty())
+            if (!name.empty())
             {
-                accounts.push_back(nameval.name_);
+                accounts.push_back(name);
             }
         }
     }
@@ -230,35 +228,35 @@ bool getaddressesbyaccount(const std::string & rpcuser, const std::string & rpcp
     {
         // LOG() << "rpc call <getaddressesbyaccount>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(account);
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getaddressesbyaccount", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getaddressesbyaccount", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != array_type)
+        else if (!result.isArray())
         {
             // Result
             LOG() << "result not an array " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Array arr = result.get_array();
-        for (const Value & v : arr)
+        UniValue arr = result.get_array();
+        for (const UniValue & v : arr.getValues())
         {
-            if (v.type() == str_type)
+            if (v.isStr())
             {
                 addresses.push_back(v.get_str());
             }
@@ -310,31 +308,31 @@ bool getInfo(const std::string & rpcuser,
     {
         LOG() << "rpc call <getinfo>";
 
-        Array params;
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getinfo", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getinfo", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "getinfo result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object o = result.get_obj();
+        UniValue o = result.get_obj();
 
         info.blocks = find_value(o, "blocks").get_int();
     }
@@ -350,89 +348,9 @@ bool getInfo(const std::string & rpcuser,
 
 //*****************************************************************************
 //*****************************************************************************
-bool createRawTransaction(const std::string & rpcuser,
-                          const std::string & rpcpasswd,
-                          const std::string & rpcip,
-                          const std::string & rpcport,
-                          const std::vector<std::pair<string, int> > & inputs,
-                          const std::vector<std::pair<std::string, double> > & outputs,
-                          const uint32_t lockTime,
-                          std::string & tx,
-                          const bool cltv=false)
-{
-    try
-    {
-        LOG() << "rpc call <createrawtransaction>";
-
-        // inputs
-        Array i;
-        for (const std::pair<string, int> & input : inputs)
-        {
-            Object tmp;
-            tmp.push_back(Pair("txid", input.first));
-            tmp.push_back(Pair("vout", input.second));
-            if (cltv)
-                tmp.push_back(Pair("sequence", static_cast<int64_t>(xbridge::SEQUENCE_FINAL)));
-            i.push_back(tmp);
-        }
-
-        // outputs
-        Object o;
-        for (const std::pair<std::string, double> & dest : outputs)
-        {
-            o.push_back(Pair(dest.first, dest.second));
-        }
-
-        Array params;
-        params.push_back(i);
-        params.push_back(o);
-
-        // locktime
-        if (lockTime > 0)
-        {
-            params.push_back(uint64_t(lockTime));
-        }
-
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "createrawtransaction", params);
-
-        // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
-
-        if (error.type() != null_type)
-        {
-            // Error
-            LOG() << "error: " << write_string(error, false);
-            // int code = find_value(error.get_obj(), "code").get_int();
-            return false;
-        }
-        else if (result.type() != str_type)
-        {
-            // Result
-            LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                                                   write_string(result, true));
-            return false;
-        }
-
-        tx = write_string(result, false);
-        if (tx[0] == '\"')
-        {
-            tx.erase(0, 1);
-        }
-        if (tx[tx.size()-1] == '\"')
-        {
-            tx.erase(tx.size()-1, 1);
-        }
-    }
-    catch (std::exception & e)
-    {
-        LOG() << "createrawtransaction exception " << e.what();
-        return false;
-    }
-
-    return true;
-}
+// NOTE: the pair<string,int> overload of createRawTransaction was removed:
+// it had zero callers and duplicated the double-serialization hazard below.
+// The single live overload takes XTxIn inputs (xbridgewalletconnectorbtc.cpp).
 
 //*****************************************************************************
 //*****************************************************************************
@@ -448,35 +366,35 @@ bool decodeRawTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <decoderawtransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "decoderawtransaction", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "decoderawtransaction", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        tx   = write_string(result, false);
+        tx   = result.write();
 
-        const Value & vtxid = find_value(result.get_obj(), "txid");
-        if (vtxid.type() == str_type)
+        const UniValue & vtxid = find_value(result.get_obj(), "txid");
+        if (vtxid.isStr())
         {
             txid = vtxid.get_str();
         }
@@ -500,22 +418,22 @@ std::string prevtxsJson(const std::vector<std::tuple<std::string, int, std::stri
         return std::string();
     }
 
-    Array arrtx;
+    UniValue arrtx(UniValue::VARR);
     for (const std::tuple<std::string, int, std::string, std::string> & prev : prevtxs)
     {
-        Object o;
-        o.push_back(Pair("txid",         std::get<0>(prev)));
-        o.push_back(Pair("vout",         std::get<1>(prev)));
-        o.push_back(Pair("scriptPubKey", std::get<2>(prev)));
+        UniValue o(UniValue::VOBJ);
+        o.pushKV("txid",         std::get<0>(prev));
+        o.pushKV("vout",         std::get<1>(prev));
+        o.pushKV("scriptPubKey", std::get<2>(prev));
         std::string redeem = std::get<3>(prev);
         if (redeem.size())
         {
-            o.push_back(Pair("redeemScript", redeem));
+            o.pushKV("redeemScript", redeem);
         }
         arrtx.push_back(o);
     }
 
-    return write_string(Value(arrtx));
+    return arrtx.write();
 }
 
 //*****************************************************************************
@@ -549,22 +467,22 @@ bool signRawTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <signrawtransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
 
         // prevtxs
         if (!prevtxs.size())
         {
-            params.push_back(Value::null);
+            params.push_back(NullUniValue);
         }
         else
         {
-            Value v;
-            if (!read_string(prevtxs, v))
+            UniValue v;
+            if (!v.read(prevtxs))
             {
                 ERR() << "error read json " << __FUNCTION__;
                 ERR() << prevtxs;
-                params.push_back(Value::null);
+                params.push_back(NullUniValue);
             }
             else
             {
@@ -575,56 +493,57 @@ bool signRawTransaction(const std::string & rpcuser,
         // priv keys
         if (!keys.size())
         {
-            params.push_back(Value::null);
+            params.push_back(NullUniValue);
         }
         else
         {
-            Array jkeys;
-            std::copy(keys.begin(), keys.end(), std::back_inserter(jkeys));
+            UniValue jkeys(UniValue::VARR);
+            for (const auto & k : keys)
+                jkeys.push_back(k);
 
             params.push_back(jkeys);
         }
 
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransaction", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransaction", params);
 
         // Parse reply
-        Value result = find_value(reply, "result");
-        const Value & error = find_value(reply, "error");
+        UniValue result = find_value(reply, "result");
+        const UniValue & error = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // For newer bitcoin clients try signrawtransactionwithwallet
             reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransactionwithwallet", params);
 
-            const Value & error2 = find_value(reply, "error");
-            if (error2.type() != null_type) {
-                LOG() << "error: " << write_string(error, false) << " " << write_string(error2, false);
+            const UniValue & error2 = find_value(reply, "error");
+            if (!error2.isNull()) {
+                LOG() << "error: " << error.write() << " " << error2.write();
                 return false;
             }
 
             result = find_value(reply, "result");
         }
 
-        if (result.type() != obj_type)
+        if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object obj = result.get_obj();
-        const Value  & tx = find_value(obj, "hex");
-        const Value & cpl = find_value(obj, "complete");
+        UniValue obj = result.get_obj();
+        const UniValue  & tx = find_value(obj, "hex");
+        const UniValue & cpl = find_value(obj, "complete");
 
-        if (tx.type() != str_type || cpl.type() != bool_type)
+        if (!tx.isStr() || !cpl.isBool())
         {
             LOG() << "bad hex " <<
-                     (tx.type() == null_type ? "" :
-                      tx.type() == str_type  ? tx.get_str() :
-                                                   write_string(tx, true));
+                     (tx.isNull() ? "" :
+                      tx.isStr()  ? tx.get_str() :
+                                                   tx.write(4, 1));
             return false;
         }
 
@@ -653,17 +572,17 @@ bool sendRawTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <sendrawtransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "sendrawtransaction", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "sendrawtransaction", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
-        if (error.type() != null_type)
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
@@ -689,27 +608,27 @@ bool getNewPubKey(const std::string & rpcuser,
     {
         LOG() << "rpc call <getnewpubkey>";
 
-        Array params;
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnewpubkey", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnewpubkey", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
@@ -737,29 +656,29 @@ bool dumpPrivKey(const std::string & rpcuser,
     {
         LOG() << "rpc call <dumpprivkey>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(address);
 
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "dumpprivkey", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "dumpprivkey", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
@@ -788,7 +707,7 @@ bool importPrivKey(const std::string & rpcuser,
     {
         LOG() << "rpc call <importprivkey>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(key);
         params.push_back(label);
         if (noScanWallet)
@@ -797,16 +716,16 @@ bool importPrivKey(const std::string & rpcuser,
         }
 
 
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "importprivkey", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "importprivkey", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
@@ -832,27 +751,27 @@ bool getNewAddress(const std::string & rpcuser,
     {
         LOG() << "rpc call <getnewaddress>";
 
-        Array params;
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnewaddress", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnewaddress", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
@@ -880,36 +799,36 @@ bool addMultisigAddress(const std::string & rpcuser,
     {
         LOG() << "rpc call <addmultisigaddress>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(static_cast<int>(keys.size()));
 
-        Array paramKeys;
+        UniValue paramKeys(UniValue::VARR);
         for (const std::string & key : keys)
         {
             paramKeys.push_back(key);
         }
         params.push_back(paramKeys);
 
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "addmultisigaddress", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "addmultisigaddress", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
@@ -937,28 +856,28 @@ bool getTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <gettransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(txid);
-        Object reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "gettransaction", params);
+        UniValue reply = xbridge::CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "gettransaction", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
@@ -985,29 +904,29 @@ bool eth_gasPrice(const std::string & rpcip,
     {
         LOG() << "rpc call <eth_gasPrice>";
 
-        Array params;
-        Object reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_gasPrice", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_gasPrice", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
 
-        const Value & result = find_value(reply, "result");
+        const UniValue & result = find_value(reply, "result");
 
-        if (result.type() != str_type)
+        if (!result.isStr())
         {
             // Result
             LOG() << "result not an array " <<
-                     (result.type() == null_type ? "" :
-                       write_string(result, true));
+                     (result.isNull() ? "" :
+                       result.write(4, 1));
             return false;
         }
 
@@ -1033,37 +952,37 @@ bool eth_accounts(const std::string   & rpcip,
     {
         LOG() << "rpc call <eth_accounts>";
 
-        Array params;
-        Object reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_accounts", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_accounts", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
 
-        const Value & result = find_value(reply, "result");
+        const UniValue & result = find_value(reply, "result");
 
-        if (result.type() != array_type)
+        if (!result.isArray())
         {
             // Result
             LOG() << "result not an array " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Array arr = result.get_array();
-        for (const Value & v : arr)
+        UniValue arr = result.get_array();
+        for (const UniValue & v : arr.getValues())
         {
-            if (v.type() == str_type)
+            if (v.isStr())
             {
                 addresses.push_back(v.get_str());
             }
@@ -1095,31 +1014,31 @@ bool eth_getBalance(const std::string & rpcip,
 
 //        for (const std::string & account : accounts)
         {
-            Array params;
+            UniValue params(UniValue::VARR);
             params.push_back(account);
             params.push_back("latest");
-            Object reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_getBalance", params);
+            UniValue reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_getBalance", params);
 
             // Parse reply
-            // const Value & result = find_value(reply, "result");
-            const Value & error  = find_value(reply, "error");
+            // const UniValue & result = find_value(reply, "result");
+            const UniValue & error  = find_value(reply, "error");
 
-            if (error.type() != null_type)
+            if (!error.isNull())
             {
                 // Error
-                LOG() << "error: " << write_string(error, false);
+                LOG() << "error: " << error.write();
                 // int code = find_value(error.get_obj(), "code").get_int();
                 return false;
             }
 
-            const Value & result = find_value(reply, "result");
+            const UniValue & result = find_value(reply, "result");
 
-            if (result.type() != str_type)
+            if (!result.isStr())
             {
                 // Result
                 LOG() << "result not an string " <<
-                         (result.type() == null_type ? "" :
-                          write_string(result, true));
+                         (result.isNull() ? "" :
+                          result.write(4, 1));
                 return false;
             }
 
@@ -1149,34 +1068,34 @@ bool eth_sendTransaction(const std::string & rpcip,
     {
         LOG() << "rpc call <eth_sendTransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         // params.push_back(rawtx);
 
-        Object o;
-        o.push_back(Pair("from",       from));
-        o.push_back(Pair("to",         to));
-        o.push_back(Pair("gas",        "0x76c0"));
-        o.push_back(Pair("gasPrice",   "0x9184e72a000"));
-        // o.push_back(Pair("value",      "0x9184e72a"));
+        UniValue o(UniValue::VOBJ);
+        o.pushKV("from",       from);
+        o.pushKV("to",         to);
+        o.pushKV("gas",        "0x76c0");
+        o.pushKV("gasPrice",   "0x9184e72a000");
+        // o.pushKV("value",      "0x9184e72a");
 
         char buf[64];
 //        sprintf(buf, "%lullx", amount); // TODO Blocknet use non-locale based func
-        o.push_back(Pair("value", buf));
+        o.pushKV("value", buf);
 
-        // o.push_back(Pair("data",       "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675"));
+        // o.pushKV("data",       "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675");
 
         params.push_back(o);
 
-        Object reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_sendTransaction", params);
+        UniValue reply = xbridge::CallRPC("rpcuser", "rpcpasswd", rpcip, rpcport, "eth_sendTransaction", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }

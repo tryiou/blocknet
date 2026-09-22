@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <rpc/server.h>
+#include <algorithm>
 
 #include <banman.h>
 #include <chainparams.h>

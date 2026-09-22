@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/blocknettransactionhistory.h>
+#include <algorithm>
 
 #include <qt/blocknetformbtn.h>
 #include <qt/blocknetguiutil.h>
@@ -514,6 +515,13 @@ bool BlocknetTransactionHistoryFilterProxy::lessThan(const QModelIndex &left, co
             return l4.toLongLong() < r4.toLongLong();
         }
     }
+    // ICU-free fallback: the base QSortFilterProxyModel::lessThan() routes strings
+    // through QCollator, which spams "posix collation implementation" warnings on
+    // every comparison with our -no-icu depends Qt build.
+    QVariant l = sourceModel()->data(left, sortRole());
+    QVariant r = sourceModel()->data(right, sortRole());
+    if (l.userType() == QMetaType::QString)
+        return l.toString().compare(r.toString(), sortCaseSensitivity()) < 0;
     return QSortFilterProxyModel::lessThan(left, right);
 }
 

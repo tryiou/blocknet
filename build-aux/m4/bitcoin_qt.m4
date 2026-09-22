@@ -122,10 +122,16 @@ AC_DEFUN([BITCOIN_QT_CONFIGURE],[
       _BITCOIN_QT_CHECK_STATIC_PLUGINS([Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin)],[-lqwindows])
       AC_DEFINE(QT_QPA_PLATFORM_WINDOWS, 1, [Define this symbol if the qt platform is windows])
     elif test "x$TARGET_OS" = xlinux; then
-      _BITCOIN_QT_CHECK_STATIC_PLUGINS([Q_IMPORT_PLUGIN(QXcbIntegrationPlugin)],[-lqxcb -lxcb-static])
+      _BITCOIN_QT_CHECK_STATIC_PLUGINS([Q_IMPORT_PLUGIN(QXcbIntegrationPlugin)],[-lqxcb])
       AC_DEFINE(QT_QPA_PLATFORM_XCB, 1, [Define this symbol if the qt platform is xcb])
     elif test "x$TARGET_OS" = xdarwin; then
       AX_CHECK_LINK_FLAG([[-framework IOKit]],[QT_LIBS="$QT_LIBS -framework IOKit"],[AC_MSG_ERROR(could not iokit framework)])
+      dnl Frameworks needed by the qcocoa static platform plugin (same set as
+      dnl upstream; CoreVideo covers the CVDisplayLink refs in libqcocoa.a).
+      AX_CHECK_LINK_FLAG([[-framework Carbon]],[QT_LIBS="$QT_LIBS -framework Carbon"],[AC_MSG_ERROR(could not link Carbon framework)])
+      AX_CHECK_LINK_FLAG([[-framework IOSurface]],[QT_LIBS="$QT_LIBS -framework IOSurface"],[AC_MSG_ERROR(could not link IOSurface framework)])
+      AX_CHECK_LINK_FLAG([[-framework QuartzCore]],[QT_LIBS="$QT_LIBS -framework QuartzCore"],[AC_MSG_ERROR(could not link QuartzCore framework)])
+      AX_CHECK_LINK_FLAG([[-framework CoreVideo]],[QT_LIBS="$QT_LIBS -framework CoreVideo"],[AC_MSG_ERROR(could not link CoreVideo framework)])
       _BITCOIN_QT_CHECK_STATIC_PLUGINS([Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin)],[-lqcocoa])
       AC_DEFINE(QT_QPA_PLATFORM_COCOA, 1, [Define this symbol if the qt platform is cocoa])
     fi
@@ -357,11 +363,12 @@ AC_DEFUN([_BITCOIN_QT_FIND_STATIC_PLUGINS],[
        if test "x$TARGET_OS" = xlinux; then
          PKG_CHECK_MODULES([X11XCB], [x11-xcb], [QT_LIBS="$X11XCB_LIBS $QT_LIBS"])
          PKG_CHECK_MODULES([QTXCBQPA], [Qt5XcbQpa], [QT_LIBS="$QTXCBQPA_LIBS $QT_LIBS"])
-       elif test "x$TARGET_OS" = xdarwin; then
-         PKG_CHECK_MODULES([QTCLIPBOARD], [Qt5ClipboardSupport], [QT_LIBS="-lQt5ClipboardSupport $QT_LIBS"])
-         PKG_CHECK_MODULES([QTGRAPHICS], [Qt5GraphicsSupport], [QT_LIBS="-lQt5GraphicsSupport $QT_LIBS"])
-         PKG_CHECK_MODULES([QTCGL], [Qt5CglSupport], [QT_LIBS="-lQt5CglSupport $QT_LIBS"])
-       fi
+        elif test "x$TARGET_OS" = xdarwin; then
+          PKG_CHECK_MODULES([QTCLIPBOARD], [Qt5ClipboardSupport], [QT_LIBS="-lQt5ClipboardSupport $QT_LIBS"])
+          PKG_CHECK_MODULES([QTGRAPHICS], [Qt5GraphicsSupport], [QT_LIBS="-lQt5GraphicsSupport $QT_LIBS"])
+          dnl No Qt5CglSupport check: our Qt is built -no-opengl, so the CGL
+          dnl support lib is not produced (same as upstream).
+        fi
      ])
      else
        if test "x$TARGET_OS" = xwindows; then
@@ -388,9 +395,18 @@ AC_DEFUN([_BITCOIN_QT_FIND_STATIC_PLUGINS],[
              BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}EventDispatcherSupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXEventDispatcherSupport not found)))
              BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}ThemeSupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXThemeSupport not found)))
              BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}FbSupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXFbSupport not found)))
-             BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}DeviceDiscoverySupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXDeviceDiscoverySupport not found)))
-             BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}AccessibilitySupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXAccessibilitySupport not found)))
-             QT_LIBS="$QT_LIBS -lversion -ldwmapi -luxtheme"
+              BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}DeviceDiscoverySupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXDeviceDiscoverySupport not found)))
+              BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}AccessibilitySupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXAccessibilitySupport not found)))
+              BITCOIN_QT_CHECK(AC_CHECK_LIB([${QT_LIB_PREFIX}WindowsUIAutomationSupport],[main],,BITCOIN_QT_FAIL(lib$QT_LIB_PREFIXWindowsUIAutomationSupport not found)))
+              dnl Bundled static image/text libs (our Qt uses -qt-libpng/-qt-pcre/-qt-harfbuzz;
+dnl mingw builds use -no-freetype, so there is no qtfreetype lib):
+              dnl without these, -lqminimal/-lqwindows fail with undefined png_*/hb_*/pcre2_* refs.
+              BITCOIN_QT_CHECK(AC_CHECK_LIB([qtlibpng],[main],,BITCOIN_QT_FAIL(libqtlibpng not found)))
+              BITCOIN_QT_CHECK(AC_CHECK_LIB([qtpcre2],[main],,BITCOIN_QT_FAIL(libqtpcre2 not found)))
+              BITCOIN_QT_CHECK(AC_CHECK_LIB([qtharfbuzz],[main],,BITCOIN_QT_FAIL(libqtharfbuzz not found)))
+              QT_LIBS="$QT_LIBS -lqtlibpng -lqtpcre2 -lqtharfbuzz"
+              dnl Windows system libs for QWindowsIntegration (WTS*, UIA, sockets, shell):
+              QT_LIBS="$QT_LIBS -lversion -ldwmapi -luxtheme -lwtsapi32 -luserenv -lnetapi32 -limm32 -lwinmm -liphlpapi -lshlwapi"
            fi
          fi
        fi

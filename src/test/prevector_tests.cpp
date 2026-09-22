@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <vector>
+#include <algorithm>
 #include <prevector.h>
 
 #include <reverse_iterator.h>

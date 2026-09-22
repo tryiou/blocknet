@@ -7,25 +7,21 @@
 #include <tinyformat.h>
 #include <uint256.h>
 
-#include <json/json_spirit.h>
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
+#include <univalue.h>
 
 #include <boost/lexical_cast.hpp>
-
-using namespace json_spirit;
 
 namespace xrouter
 {
 
-static Value getResult(const std::string & obj)
+static UniValue getResult(const std::string & obj)
 {
-    Value obj_val; read_string(obj, obj_val);
-    if (obj_val.type() == null_type)
-        return Value(obj);
-    const Value & r = find_value(obj_val.get_obj(), "result");
-    if (r.type() == null_type)
-        return Value(obj);
+    UniValue obj_val;
+    if (!obj_val.read(obj) || obj_val.isNull())
+        return UniValue(obj);
+    const UniValue & r = find_value(obj_val.get_obj(), "result");
+    if (r.isNull())
+        return UniValue(obj);
     return r;
 }
 
@@ -50,41 +46,48 @@ static unsigned int hex2dec(const std::string & s) {
 std::string EthWalletConnectorXRouter::getBlockCount() const
 {
     static const std::string command("eth_blockNumber");
-    const auto & data = CallRPC(m_user, m_passwd, m_ip, m_port, command, Array(), jsonver, contenttype);
+    const auto & data = CallRPC(m_user, m_passwd, m_ip, m_port, command, UniValue(UniValue::VARR), jsonver, contenttype);
 
-    Value data_val; read_string(data, data_val);
-    if (data_val.type() != obj_type)
+    UniValue data_val;
+    if (!data_val.read(data) || !data_val.isObject())
         return data;
 
     const auto & result_val = getResult(data);
-    if (result_val.type() != str_type)
+    if (!result_val.isStr())
         return data;
 
     auto blockCount = hex2dec(result_val.get_str());
 
-    auto o = data_val.get_obj();
-    for (int i = 0; i < o.size(); ++i) {
-        const auto & item = o[i];
-        if (item.name_ == "result") {
-            o.erase(o.begin()+i);
-            o.insert(o.begin()+i, Pair("result", static_cast<int>(blockCount)));
-            return write_string(Value(o));
-        }
+    // Replace the "result" hex string with the decimal block count
+    UniValue o = data_val.get_obj();
+    const auto & keys = o.getKeys();
+    const auto & values = o.getValues();
+    UniValue nret(UniValue::VOBJ);
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (keys[i] == "result")
+            nret.pushKV("result", static_cast<int>(blockCount));
+        else if (i < values.size())
+            nret.pushKV(keys[i], values[i]);
     }
-
-    return data;
+    return nret.write();
 }
 
 std::string EthWalletConnectorXRouter::getBlockHash(const int & block) const
 {
     static const std::string command("eth_getBlockByNumber");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, { dec2hex(block), false }, jsonver, contenttype);
+    UniValue params(UniValue::VARR);
+    params.push_back(dec2hex(block));
+    params.push_back(false);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::string EthWalletConnectorXRouter::getBlock(const std::string & blockHash) const
 {
     static const std::string command("eth_getBlockByHash");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, { blockHash, false }, jsonver, contenttype);
+    UniValue params(UniValue::VARR);
+    params.push_back(blockHash);
+    params.push_back(false);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::vector<std::string> EthWalletConnectorXRouter::getBlocks(const std::vector<std::string> & blockHashes) const
@@ -98,13 +101,16 @@ std::vector<std::string> EthWalletConnectorXRouter::getBlocks(const std::vector<
 std::string EthWalletConnectorXRouter::getTransaction(const std::string & trHash) const
 {
     static const std::string command("eth_getTransactionByHash");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, { trHash }, jsonver, contenttype);
+    UniValue params(UniValue::VARR);
+    params.push_back(trHash);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::string EthWalletConnectorXRouter::decodeRawTransaction(const std::string & trHash) const
 {
-    Object unsupported; unsupported.emplace_back("error", "Unsupported");
-    return write_string(Value(unsupported), pretty_print);
+    UniValue unsupported(UniValue::VOBJ);
+    unsupported.pushKV("error", "Unsupported");
+    return unsupported.write(/*prettyIndent=*/4, /*indentLevel=*/1);
 }
 
 std::vector<std::string> EthWalletConnectorXRouter::getTransactions(const std::vector<std::string> & txHashes) const
@@ -117,26 +123,31 @@ std::vector<std::string> EthWalletConnectorXRouter::getTransactions(const std::v
 
 std::vector<std::string> EthWalletConnectorXRouter::getTransactionsBloomFilter(const int &, CDataStream &, const int &) const
 {
-    Object unsupported; unsupported.emplace_back("error", "Unsupported");
-    return std::vector<std::string>{write_string(Value(unsupported), pretty_print)};
+    UniValue unsupported(UniValue::VOBJ);
+    unsupported.pushKV("error", "Unsupported");
+    return std::vector<std::string>{unsupported.write(/*prettyIndent=*/4, /*indentLevel=*/1)};
 }
 
 std::string EthWalletConnectorXRouter::sendTransaction(const std::string & rawtx) const
 {
     static const std::string command("eth_sendRawTransaction");
-    return CallRPC(m_user, m_passwd, m_ip, m_port, command, { rawtx }, jsonver, contenttype);
+    UniValue params(UniValue::VARR);
+    params.push_back(rawtx);
+    return CallRPC(m_user, m_passwd, m_ip, m_port, command, params, jsonver, contenttype);
 }
 
 std::string EthWalletConnectorXRouter::convertTimeToBlockCount(const std::string & timestamp) const
 {
-    Object unsupported; unsupported.emplace_back("error", "Unsupported");
-    return write_string(Value(unsupported), pretty_print);
+    UniValue unsupported(UniValue::VOBJ);
+    unsupported.pushKV("error", "Unsupported");
+    return unsupported.write(/*prettyIndent=*/4, /*indentLevel=*/1);
 }
 
 std::string EthWalletConnectorXRouter::getBalance(const std::string & address) const
 {
-    Object unsupported; unsupported.emplace_back("error", "Unsupported");
-    return write_string(Value(unsupported), pretty_print);
+    UniValue unsupported(UniValue::VOBJ);
+    unsupported.pushKV("error", "Unsupported");
+    return unsupported.write(/*prettyIndent=*/4, /*indentLevel=*/1);
 }
 
 } // namespace xrouter

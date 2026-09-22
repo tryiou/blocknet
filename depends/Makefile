@@ -123,7 +123,7 @@ $(host_prefix)/.stamp_$(final_build_id): $(native_packages) $(packages)
 	$(AT)mkdir -p $(@D)
 	$(AT)echo copying packages: $^
 	$(AT)echo to: $(@D)
-	$(AT)cd $(@D); $(foreach package,$^, tar xf $($(package)_cached); )
+	$(AT)cd $(@D); $(foreach package,$^, tar --no-same-owner --no-same-permissions -xf $($(package)_cached); )
 	$(AT)touch $@
 
 $(host_prefix)/share/config.site : config.site.in $(host_prefix)/.stamp_$(final_build_id)
@@ -185,7 +185,7 @@ install: check-packages $(host_prefix)/share/config.site
 download-one: check-sources $(all_sources)
 
 download-osx:
-	@$(MAKE) -s HOST=x86_64-apple-darwin14 download-one
+	@$(MAKE) -s HOST=x86_64-apple-darwin download-one
 download-linux:
 	@$(MAKE) -s HOST=x86_64-unknown-linux-gnu download-one
 download-win:

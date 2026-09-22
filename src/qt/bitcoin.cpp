@@ -386,14 +386,8 @@ void BitcoinApplication::initializeResult(bool success)
         qWarning() << "Platform customization:" << platformStyle->getName();
 #ifdef ENABLE_WALLET
         m_wallet_controller = new WalletController(m_node, platformStyle, optionsModel, this);
-#ifdef ENABLE_BIP70
-        PaymentServer::LoadRootCAs();
-#endif
         if (paymentServer) {
             paymentServer->setOptionsModel(optionsModel);
-#ifdef ENABLE_BIP70
-            connect(m_wallet_controller, &WalletController::coinsSent, paymentServer, &PaymentServer::fetchPaymentACK);
-#endif
         }
 #endif
 
@@ -462,9 +456,6 @@ bool BitcoinApplication::isClassic() {
 
 static void SetupUIArgs()
 {
-#if defined(ENABLE_WALLET) && defined(ENABLE_BIP70)
-    gArgs.AddArg("-allowselfsignedrootcertificates", strprintf("Allow self signed root certificates (default: %u)", DEFAULT_SELFSIGNED_ROOTCERTS), true, OptionsCategory::GUI);
-#endif
 #if defined(ENABLE_WALLET)
     gArgs.AddArg("-classic", "Show the Classic wallet user interface (gui)", false, OptionsCategory::GUI);
 #endif
@@ -472,7 +463,6 @@ static void SetupUIArgs()
     gArgs.AddArg("-lang=<lang>", "Set language, for example \"de_DE\" (default: system locale)", false, OptionsCategory::GUI);
     gArgs.AddArg("-min", "Start minimized", false, OptionsCategory::GUI);
     gArgs.AddArg("-resetguisettings", "Reset all settings changed in the GUI", false, OptionsCategory::GUI);
-    gArgs.AddArg("-rootcertificates=<file>", "Set SSL root certificates for payment request (default: -system-)", false, OptionsCategory::GUI);
     gArgs.AddArg("-splash", strprintf("Show splash screen on startup (default: %u)", DEFAULT_SPLASHSCREEN), false, OptionsCategory::GUI);
     gArgs.AddArg("-uiplatform", strprintf("Select platform to customize UI for (one of windows, macosx, other; default: %s)", BitcoinGUI::DEFAULT_UIPLATFORM), true, OptionsCategory::GUI);
 }

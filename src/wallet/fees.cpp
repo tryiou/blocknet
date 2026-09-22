@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <wallet/fees.h>
+#include <algorithm>
 
 #include <policy/policy.h>
 #include <txmempool.h>

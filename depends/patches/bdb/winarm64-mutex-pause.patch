@@ -1,0 +1,21 @@
+--- a/dbinc/mutex_int.h	2010-04-12 22:25:22.000000000 +0200
++++ b/dbinc/mutex_int.h	2026-09-09 17:26:56.642019970 +0200
+@@ -375,10 +375,18 @@
+ #endif
+ #endif
+ #ifdef HAVE_MUTEX_WIN32_GCC
++/*
++ * The x86 PAUSE ("rep; nop") spin hint has an ARM64 equivalent: YIELD.
++ * llvm-mingw targets ARM64 Windows, where the x86 form does not assemble.
++ */
++#if defined(__aarch64__) || defined(_M_ARM64)
++#define	MUTEX_PAUSE		__asm__ volatile ("yield" : : );
++#else
+ #define	MUTEX_PAUSE		__asm__ volatile ("rep; nop" : : );
+ #endif
+ #endif
+ #endif
++#endif
+ 
+ /*********************************************************************
+  * 68K/gcc assembly.

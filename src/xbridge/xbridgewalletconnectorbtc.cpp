@@ -6,6 +6,8 @@
 //*****************************************************************************
 
 #include <xbridge/xbridgewalletconnectorbtc.h>
+#include <algorithm>
+#include <iterator>
 
 #include <xbridge/util/logger.h>
 #include <xbridge/util/xutil.h>
@@ -16,9 +18,6 @@
 #include <base58.h>
 #include <primitives/transaction.h>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
 
 #include <boost/iostreams/concepts.hpp>
 #include <boost/lexical_cast.hpp>
@@ -33,7 +32,6 @@ namespace xbridge
 namespace rpc
 {
 
-using namespace json_spirit;
 
 //*****************************************************************************
 //*****************************************************************************
@@ -45,34 +43,34 @@ bool getinfo(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         // LOG() << "rpc call <getinfo>";
 
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getinfo", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getinfo", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object o = result.get_obj();
+        UniValue o = result.get_obj();
 
-        const Value & relayFee = find_value(o, "relayfee");
-        if (relayFee.type() != null_type)
+        const UniValue & relayFee = find_value(o, "relayfee");
+        if (!relayFee.isNull())
             info.relayFee = relayFee.get_real();
         info.blocks   = find_value(o, "blocks").get_int();
     }
@@ -95,33 +93,33 @@ bool getnetworkinfo(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         // LOG() << "rpc call <getnetworkinfo>";
 
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnetworkinfo", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnetworkinfo", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object o = result.get_obj();
-        const Value & relayFee = find_value(o, "relayfee");
-        if (relayFee.type() != null_type)
+        UniValue o = result.get_obj();
+        const UniValue & relayFee = find_value(o, "relayfee");
+        if (!relayFee.isNull())
             info.relayFee = relayFee.get_real();
     }
     catch (std::exception & e)
@@ -141,40 +139,40 @@ bool getblockchaininfo(const std::string & rpcuser, const std::string & rpcpassw
 {
     try
     {
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblockchaininfo", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblockchaininfo", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object o = result.get_obj();
+        UniValue o = result.get_obj();
 
         info.blocks = find_value(o, "blocks").get_real();
         // median time
         auto mt = find_value(o, "mediantime");
-        if (mt.type() != null_type)
+        if (!mt.isNull())
             info.mediantime = mt.get_int64();
         // best block hash
         const auto & bbh = find_value(o, "bestblockhash");
-        if (bbh.type() != null_type)
+        if (!bbh.isNull())
             info.bestblockhash = uint256S(bbh.get_str());
     }
     catch (std::exception & e)
@@ -194,31 +192,31 @@ bool getblock(const std::string & rpcuser, const std::string & rpcpasswd,
 {
     try
     {
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(blockHash);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblock", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblock", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "getblock error: " << write_string(error, false);
+            LOG() << "getblock error: " << error.write();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "getblock result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        rawBlock = write_string(result, true);
+        rawBlock = result.write(4, 1);
     }
     catch (std::exception & e)
     {
@@ -237,21 +235,21 @@ bool getblockhash(const std::string & rpcuser, const std::string & rpcpasswd,
 {
     try
     {
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(static_cast<int>(block));
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblockhash", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblockhash", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "getblockhash error: " << write_string(error, false);
+            LOG() << "getblockhash error: " << error.write();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "getblockhash result is not a string";
@@ -275,16 +273,16 @@ bool getblockcount(const std::string & rpcuser, const std::string & rpcpasswd,
                    const std::string & rpcip, const std::string & rpcport, uint32_t & blockCount)
 {
     try {
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblockcount", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getblockcount", params);
 
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type) {
-            LOG() << "getblockcount error: " << write_string(error, false);
+        if (!error.isNull()) {
+            LOG() << "getblockcount error: " << error.write();
             return false;
-        } else if (result.type() != int_type) {
+        } else if (!result.isNum()) {
             LOG() << "getblockcount result is not an int";
             return false;
         }
@@ -308,34 +306,34 @@ bool listaccounts(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         // LOG() << "rpc call <listaccounts>";
 
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listaccounts", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listaccounts", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object acclist = result.get_obj();
-        for (auto nameval : acclist)
+        UniValue acclist = result.get_obj();
+        for (const auto & name : acclist.getKeys())
         {
-            accounts.push_back(nameval.name_);
+            accounts.push_back(name);
         }
     }
     catch (std::exception & e)
@@ -356,39 +354,39 @@ bool listaddressgroupings(const std::string & rpcuser, const std::string & rpcpa
     {
         LOG() << "rpc call <listaddressgroupings>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         //params.push_back(addresses);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listaddressgroupings", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listaddressgroupings", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
-        if (error.type() != null_type)
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != array_type)
+        else if (!result.isArray())
         {
             // Result
             LOG() << "result not an array " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
 
-        Array arr = result.get_array();
-        for (const Value & v : arr)
+        UniValue arr = result.get_array();
+        for (const UniValue & v : arr.getValues())
         {
-            Array varray = v.get_array();
-            for (const Value & varr : varray)
+            UniValue varray = v.get_array();
+            for (const UniValue & varr : varray.getValues())
             {
-                Array vaddress = varr.get_array();
-                if (!vaddress.empty() && vaddress[0].type() == str_type)
+                UniValue vaddress = varr.get_array();
+                if (!vaddress.empty() && vaddress[0].isStr())
                 {
                     addresses.push_back(vaddress[0].get_str());
                 }
@@ -415,35 +413,35 @@ bool getaddressesbyaccount(const std::string & rpcuser, const std::string & rpcp
     {
         // LOG() << "rpc call <getaddressesbyaccount>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(account);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getaddressesbyaccount", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getaddressesbyaccount", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != array_type)
+        else if (!result.isArray())
         {
             // Result
             LOG() << "result not an array " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Array arr = result.get_array();
-        for (const Value & v : arr)
+        UniValue arr = result.get_array();
+        for (const UniValue & v : arr.getValues())
         {
-            if (v.type() == str_type)
+            if (v.isStr())
             {
                 addresses.push_back(v.get_str());
             }
@@ -466,18 +464,18 @@ bool validateaddress(const std::string & rpcuser, const std::string & rpcpasswd,
 {
     try
     {
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(address);
         params.push_back(address);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signmessage", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signmessage", params);
 
         // Parse reply
-        Value result = find_value(reply, "result");
-        Value error  = find_value(reply, "error");
-        if (error.type() != null_type)
+        UniValue result = find_value(reply, "result");
+        UniValue error  = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "signmessage failed for address:" << address << " error: " << write_string(error, false);
+            LOG() << "signmessage failed for address:" << address << " error: " << error.write();
             return false;
         }
 
@@ -508,64 +506,68 @@ bool listUnspent(const std::string & rpcuser,
     {
         LOG() << "rpc call <listunspent>";
 
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listunspent", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "listunspent", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != array_type)
+        else if (!result.isArray())
         {
             // Result
             LOG() << "result not an array " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Array arr = result.get_array();
-        for (const Value & v : arr)
+        UniValue arr = result.get_array();
+        for (const UniValue & v : arr.getValues())
         {
-            if (v.type() == obj_type)
+            if (v.isObject())
             {
-                const Value & spendable = find_value(v.get_obj(), "spendable");
-                if (spendable.type() == bool_type && !spendable.get_bool())
+                const UniValue & spendable = find_value(v.get_obj(), "spendable");
+                if (spendable.isBool() && !spendable.get_bool())
                     continue;
 
                 wallet::UtxoEntry u;
                 int confs = -1;
 
-                Object o = v.get_obj();
-                for (const auto & v : o)
+                UniValue o = v.get_obj();
+                const auto & okeys = o.getKeys();
+                const auto & ovals = o.getValues();
+                for (size_t oi = 0; oi < okeys.size() && oi < ovals.size(); ++oi)
                 {
-                    if (v.name_ == txid)
+                    const std::string & oname = okeys[oi];
+                    const UniValue & oval = ovals[oi];
+                    if (oname == txid)
                     {
-                        u.txId = v.value_.get_str();
+                        u.txId = oval.get_str();
                     }
-                    else if (v.name_ == vout)
+                    else if (oname == vout)
                     {
-                        u.vout = v.value_.get_int();
+                        u.vout = oval.get_int();
                     }
-                    else if (v.name_ == amount)
+                    else if (oname == amount)
                     {
-                        u.amount = v.value_.get_real();
+                        u.amount = oval.get_real();
                     }
-                    else if (v.name_ == scriptPubKey)
+                    else if (oname == scriptPubKey)
                     {
-                        u.scriptPubKey = v.value_.get_str();
+                        u.scriptPubKey = oval.get_str();
                     }
-                    else if (v.name_ == confirmations)
+                    else if (oname == confirmations)
                     {
-                        confs = v.value_.get_int();
+                        confs = oval.get_int();
                         u.confirmations = confs > 0 ? confs : 0;
                         u.hasConfirmations = confs > 0;
                     }
@@ -603,44 +605,44 @@ bool lockUnspent(const std::string & rpcuser,
     {
         LOG() << "rpc call <lockunspent>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
 
         // 1. unlock
         params.push_back(lock ? false : true);
 
         // 2. txoutputs
-        Array outputs;
+        UniValue outputs(UniValue::VARR);
         for (const wallet::UtxoEntry & entry : entries)
         {
-            Object o;
-            o.push_back(Pair(txid, entry.txId));
-            o.push_back(Pair(vout, (int)entry.vout));
+            UniValue o(UniValue::VOBJ);
+            o.pushKV(txid, entry.txId);
+            o.pushKV(vout, (int)entry.vout);
 
             outputs.push_back(o);
         }
 
         params.push_back(outputs);
 
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "lockunspent", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "lockunspent", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-//        else if (result.type() != array_type)
+//        else if (!result.isArray())
 //        {
 //            // Result
 //            LOG() << "result not an array " <<
-//                     (result.type() == null_type ? "" :
-//                      result.type() == str_type  ? result.get_str() :
-//                                                   write_string(result, true));
+//                     (result.isNull() ? "" :
+//                      result.isStr()  ? result.get_str() :
+//                                                   result.write(4, 1));
 //            return false;
 //        }
 
@@ -668,38 +670,38 @@ bool gettxout(const std::string & rpcuser,
 
         txout.amount = 0;
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(txout.txId);
         params.push_back(static_cast<int>(txout.vout));
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "gettxout", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "gettxout", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object o = result.get_obj();
+        UniValue o = result.get_obj();
         txout.amount = find_value(o, "value").get_real();
 
         // Assign confirmations
         const auto & rconfs = find_value(o, "confirmations");
-        if (rconfs.type() == int_type)
+        if (rconfs.isNum())
             txout.setConfirmations(rconfs.get_int());
     }
     catch (std::exception & e)
@@ -725,71 +727,72 @@ bool gettransaction(const std::string & rpcuser,
 
         txout.amount = 0;
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(txout.txId);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getrawtransaction", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getrawtransaction", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result of getrawtransaction not a string " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
 
-        Array d { Value(result.get_str()) };
+        UniValue d(UniValue::VARR);
+        d.push_back(result.get_str());
         reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "decoderawtransaction", d);
 
-        const Value & result2 = find_value(reply, "result");
-        const Value & error2  = find_value(reply, "error");
+        const UniValue & result2 = find_value(reply, "result");
+        const UniValue & error2  = find_value(reply, "error");
 
-        if (error2.type() != null_type)
+        if (!error2.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error2, false);
+            LOG() << "error: " << error2.write();
             return false;
         }
-        else if (result2.type() != obj_type)
+        else if (!result2.isObject())
         {
             // Result
             LOG() << "result of decoderawtransaction not an object " <<
-                     (result2.type() == null_type ? "" :
-                      result2.type() == str_type  ? result2.get_str() :
-                                                   write_string(result2, true));
+                     (result2.isNull() ? "" :
+                      result2.isStr()  ? result2.get_str() :
+                                                   result2.write(4, 1));
             return false;
         }
 
-        Object o = result2.get_obj();
+        UniValue o = result2.get_obj();
 
-        const Value & vouts = find_value(o, "vout");
-        if(vouts.type() != array_type)
+        const UniValue & vouts = find_value(o, "vout");
+        if(!vouts.isArray())
         {
             LOG() << "vout not an array type";
             return false;
         }
 
-        for(const Value & element : vouts.get_array())
+        for(const UniValue & element : vouts.get_array().getValues())
         {
-            if(element.type() != obj_type)
+            if(!element.isObject())
             {
                 LOG() << "vouts element not an object type";
                 return false;
             }
 
-            Object elementObj = element.get_obj();
+            UniValue elementObj = element.get_obj();
 
             uint32_t vout = find_value(elementObj, "n").get_int();
             if(vout == txout.vout)
@@ -822,44 +825,44 @@ bool getRawTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <getrawtransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(txid);
         if (verbose)
         {
             params.push_back(1);
         }
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getrawtransaction", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getrawtransaction", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
 
         if (verbose)
         {
-            if (result.type() != obj_type)
+            if (!result.isObject())
             {
                 // Result
-                LOG() << "result not an object " << write_string(result, true);
+                LOG() << "result not an object " << result.write(4, 1);
                 return false;
             }
 
             // transaction exists, success
-            tx = write_string(result, true);
+            tx = result.write(4, 1);
         }
         else
         {
-            if (result.type() != str_type)
+            if (!result.isStr())
             {
                 // Result
-                LOG() << "result not an string " << write_string(result, true);
+                LOG() << "result not an string " << result.write(4, 1);
                 return false;
             }
 
@@ -888,27 +891,27 @@ bool getNewAddress(const std::string & rpcuser,
     {
         LOG() << "rpc call <getnewaddress>";
 
-        Array params;
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnewaddress", params);
+        UniValue params(UniValue::VARR);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getnewaddress", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
@@ -926,39 +929,48 @@ bool getNewAddress(const std::string & rpcuser,
 //*****************************************************************************
 //*****************************************************************************
 bool createRawTransaction(const std::string & rpcuser,
-                          const std::string & rpcpasswd,
-                          const std::string & rpcip,
-                          const std::string & rpcport,
-                          const std::vector<XTxIn> & inputs,
-                          const std::vector<std::pair<std::string, double> > & outputs,
-                          const uint32_t lockTime,
-                          std::string & tx,
-                          const bool cltv=false)
+                           const std::string & rpcpasswd,
+                           const std::string & rpcip,
+                           const std::string & rpcport,
+                           const std::vector<XTxIn> & inputs,
+                           const std::vector<std::pair<std::string, std::string> > & outputs,
+                           const uint32_t lockTime,
+                           std::string & tx,
+                           const bool cltv=false)
 {
     try
     {
         LOG() << "rpc call <createrawtransaction>";
 
         // inputs
-        Array i;
+        UniValue i(UniValue::VARR);
         for (const XTxIn & input : inputs)
         {
-            Object tmp;
-            tmp.push_back(Pair("txid", input.txid));
-            tmp.push_back(Pair("vout", static_cast<int>(input.n)));
+            UniValue tmp(UniValue::VOBJ);
+            tmp.pushKV("txid", input.txid);
+            tmp.pushKV("vout", static_cast<int>(input.n));
             if (cltv)
-                tmp.push_back(Pair("sequence", static_cast<int64_t>(xbridge::SEQUENCE_FINAL)));
+                tmp.pushKV("sequence", static_cast<int64_t>(xbridge::SEQUENCE_FINAL));
             i.push_back(tmp);
         }
 
-        // outputs
-        Object o;
-        for (const std::pair<std::string, double> & dest : outputs)
+        // outputs: exact decimal strings (see xBridgeAmountToString). Doubles
+        // must never reach this call: UniValue serializes them with
+        // setprecision(16), which can exceed the wallet's 8 decimals and is
+        // rejected with code -3 "Invalid amount".
+        UniValue o(UniValue::VOBJ);
+        for (const std::pair<std::string, std::string> & dest : outputs)
         {
-            o.push_back(Pair(dest.first, dest.second));
+            UniValue amount(UniValue::VNUM);
+            if (!amount.setNumStr(dest.second))
+            {
+                LOG() << "invalid output amount <" << dest.second << "> for <" << dest.first << ">";
+                return false;
+            }
+            o.pushKV(dest.first, amount);
         }
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(i);
         params.push_back(o);
 
@@ -968,29 +980,29 @@ bool createRawTransaction(const std::string & rpcuser,
             params.push_back(uint64_t(lockTime));
         }
 
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "createrawtransaction", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "createrawtransaction", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != str_type)
+        else if (!result.isStr())
         {
             // Result
             LOG() << "result not an string " <<
-                     (result.type() == null_type ? "" :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                                                   result.write(4, 1));
             return false;
         }
 
-        tx = write_string(result, false);
+        tx = result.write();
         if (tx[0] == '\"')
         {
             tx.erase(0, 1);
@@ -1019,22 +1031,22 @@ std::string prevtxsJson(const std::vector<std::tuple<std::string, int, std::stri
         return std::string();
     }
 
-    Array arrtx;
+    UniValue arrtx(UniValue::VARR);
     for (const std::tuple<std::string, int, std::string, std::string> & prev : prevtxs)
     {
-        Object o;
-        o.push_back(Pair("txid",         std::get<0>(prev)));
-        o.push_back(Pair("vout",         std::get<1>(prev)));
-        o.push_back(Pair("scriptPubKey", std::get<2>(prev)));
+        UniValue o(UniValue::VOBJ);
+        o.pushKV("txid",         std::get<0>(prev));
+        o.pushKV("vout",         std::get<1>(prev));
+        o.pushKV("scriptPubKey", std::get<2>(prev));
         std::string redeem = std::get<3>(prev);
         if (redeem.size())
         {
-            o.push_back(Pair("redeemScript", redeem));
+            o.pushKV("redeemScript", redeem);
         }
         arrtx.push_back(o);
     }
 
-    return write_string(Value(arrtx));
+    return arrtx.write();
 }
 
 //*****************************************************************************
@@ -1052,22 +1064,22 @@ bool signRawTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <signrawtransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
 
         // prevtxs
         if (!prevtxs.size())
         {
-            params.push_back(Value::null);
+            params.push_back(NullUniValue);
         }
         else
         {
-            Value v;
-            if (!read_string(prevtxs, v))
+            UniValue v;
+            if (!v.read(prevtxs))
             {
                 ERR() << "error read json " << __FUNCTION__;
                 ERR() << prevtxs;
-                params.push_back(Value::null);
+                params.push_back(NullUniValue);
             }
             else
             {
@@ -1078,56 +1090,57 @@ bool signRawTransaction(const std::string & rpcuser,
         // priv keys
         if (!keys.size())
         {
-            params.push_back(Value::null);
+            params.push_back(NullUniValue);
         }
         else
         {
-            Array jkeys;
-            std::copy(keys.begin(), keys.end(), std::back_inserter(jkeys));
+            UniValue jkeys(UniValue::VARR);
+            for (const auto & k : keys)
+                jkeys.push_back(k);
 
             params.push_back(jkeys);
         }
 
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransaction", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransaction", params);
 
         // Parse reply
-        Value result = find_value(reply, "result");
-        const Value & error = find_value(reply, "error");
+        UniValue result = find_value(reply, "result");
+        const UniValue & error = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // For newer bitcoin clients try signrawtransactionwithwallet
             reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signrawtransactionwithwallet", params);
 
-            const Value & error2 = find_value(reply, "error");
-            if (error2.type() != null_type) {
-                LOG() << "error: " << write_string(error, false) << " " << write_string(error2, false);
+            const UniValue & error2 = find_value(reply, "error");
+            if (!error2.isNull()) {
+                LOG() << "error: " << error.write() << " " << error2.write();
                 return false;
             }
 
             result = find_value(reply, "result");
         }
 
-        if (result.type() != obj_type)
+        if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        Object obj = result.get_obj();
-        const Value  & tx = find_value(obj, "hex");
-        const Value & cpl = find_value(obj, "complete");
+        UniValue obj = result.get_obj();
+        const UniValue  & tx = find_value(obj, "hex");
+        const UniValue & cpl = find_value(obj, "complete");
 
-        if (tx.type() != str_type || cpl.type() != bool_type)
+        if (!tx.isStr() || !cpl.isBool())
         {
             LOG() << "bad hex " <<
-                     (tx.type() == null_type ? "" :
-                      tx.type() == str_type  ? tx.get_str() :
-                                                   write_string(tx, true));
+                     (tx.isNull() ? "" :
+                      tx.isStr()  ? tx.get_str() :
+                                                   tx.write(4, 1));
             return false;
         }
 
@@ -1174,35 +1187,35 @@ bool decodeRawTransaction(const std::string & rpcuser,
     {
         LOG() << "rpc call <decoderawtransaction>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "decoderawtransaction", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "decoderawtransaction", params);
 
         // Parse reply
-        const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
+        const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
 
-        if (error.type() != null_type)
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             // int code = find_value(error.get_obj(), "code").get_int();
             return false;
         }
-        else if (result.type() != obj_type)
+        else if (!result.isObject())
         {
             // Result
             LOG() << "result not an object " <<
-                     (result.type() == null_type ? "" :
-                      result.type() == str_type  ? result.get_str() :
-                                                   write_string(result, true));
+                     (result.isNull() ? "" :
+                      result.isStr()  ? result.get_str() :
+                                                   result.write(4, 1));
             return false;
         }
 
-        tx   = write_string(result, false);
+        tx   = result.write();
 
-        const Value & vtxid = find_value(result.get_obj(), "txid");
-        if (vtxid.type() == str_type)
+        const UniValue & vtxid = find_value(result.get_obj(), "txid");
+        if (vtxid.isStr())
         {
             txid = vtxid.get_str();
         }
@@ -1233,28 +1246,29 @@ bool sendRawTransaction(const std::string & rpcuser,
 
         errorCode = 0;
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(rawtx);
-        Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "sendrawtransaction", params);
+        UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "sendrawtransaction", params);
 
         // Parse reply
-        // const Value & result = find_value(reply, "result");
-        const Value & error  = find_value(reply, "error");
-        if (error.type() != null_type)
+        // const UniValue & result = find_value(reply, "result");
+        const UniValue & error  = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             errorCode = find_value(error.get_obj(), "code").get_int();
             message = find_value(error.get_obj(), "message").get_str();
 
             return false;
         }
 
-        const Value & result = find_value(reply, "result");
-        if (result.type() != str_type)
+        const UniValue & result = find_value(reply, "result");
+        if (!result.isStr())
         {
             // Result
-            LOG() << "result not an string " << write_string(result, true);
+            LOG() << "result not an string " << result.write(4, 1);
+            errorCode = -1;
             return false;
         }
 
@@ -1282,25 +1296,25 @@ bool signMessage(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         LOG() << "rpc call <signmessage>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(address);
         params.push_back(message);
-        const Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signmessage", params);
+        const UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "signmessage", params);
 
         // reply
-        const Value & error  = find_value(reply, "error");
-        if (error.type() != null_type)
+        const UniValue & error  = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             return false;
         }
 
-        const Value & result = find_value(reply, "result");
-        if (result.type() != str_type)
+        const UniValue & result = find_value(reply, "result");
+        if (!result.isStr())
         {
             // Result
-            LOG() << "result not an string " << write_string(result, true);
+            LOG() << "result not an string " << result.write(4, 1);
             return false;
         }
 
@@ -1339,26 +1353,26 @@ bool verifyMessage(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         LOG() << "rpc call <verifymessage>";
 
-        Array params;
+        UniValue params(UniValue::VARR);
         params.push_back(address);
         params.push_back(signature);
         params.push_back(message);
-        const Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "verifymessage", params);
+        const UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "verifymessage", params);
 
         // reply
-        const Value & error  = find_value(reply, "error");
-        if (error.type() != null_type)
+        const UniValue & error  = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "error: " << write_string(error, false);
+            LOG() << "error: " << error.write();
             return false;
         }
 
-        const Value & result = find_value(reply, "result");
-        if (result.type() != bool_type)
+        const UniValue & result = find_value(reply, "result");
+        if (!result.isBool())
         {
             // Result
-            LOG() << "result not an string " << write_string(result, true);
+            LOG() << "result not an string " << result.write(4, 1);
             return false;
         }
 
@@ -1383,23 +1397,23 @@ bool getRawMempool(const std::string & rpcuser, const std::string & rpcpasswd,
     {
         LOG() << "rpc call <getrawmempool>";
 
-        Array params;
-        const Object reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getrawmempool", params);
+        UniValue params(UniValue::VARR);
+        const UniValue reply = CallRPC(rpcuser, rpcpasswd, rpcip, rpcport, "getrawmempool", params);
 
         // reply
-        const Value & error = find_value(reply, "error");
-        if (error.type() != null_type)
+        const UniValue & error = find_value(reply, "error");
+        if (!error.isNull())
         {
             // Error
-            LOG() << "getrawmempool error: " << write_string(error, false);
+            LOG() << "getrawmempool error: " << error.write();
             return false;
         }
 
-        const Value & result = find_value(reply, "result");
-        if (result.type() != array_type)
+        const UniValue & result = find_value(reply, "result");
+        if (!result.isArray())
         {
             // Result
-            LOG() << "getrawmempool result is not an array " << write_string(result, true);
+            LOG() << "getrawmempool result is not an array " << result.write(4, 1);
             return false;
         }
 
@@ -1753,26 +1767,26 @@ bool BtcWalletConnector<CryptoProvider>::isUTXOSpentInTx(const std::string & txi
         return false;
     }
 
-    json_spirit::Value txv;
-    if (!json_spirit::read_string(json, txv))
+    UniValue txv;
+    if (!txv.read(json))
     {
         LOG() << "json read error for " << txid << " " << __FUNCTION__;
         return false;
     }
 
-    auto & txo = txv.get_obj();
-    auto & vins = json_spirit::find_value(txo, "vin").get_array();
-    for (auto & vin : vins) {
-        if (vin.type() != json_spirit::obj_type)
+    const UniValue & txo = txv.get_obj();
+    const UniValue & vins = find_value(txo, "vin").get_array();
+    for (const auto & vin : vins.getValues()) {
+        if (!vin.isObject())
             continue;
-        auto & vino = vin.get_obj();
+        const UniValue & vino = vin.get_obj();
         // Check txid
-        auto & vin_txid = json_spirit::find_value(vino, "txid");
-        if (vin_txid.type() != json_spirit::str_type)
+        const UniValue & vin_txid = find_value(vino, "txid");
+        if (!vin_txid.isStr())
             continue;
         // Check vout
-        auto & vin_vout = json_spirit::find_value(vino, "vout");
-        if (vin_vout.type() != json_spirit::int_type)
+        const UniValue & vin_vout = find_value(vino, "vout");
+        if (!vin_vout.isNum())
             continue;
         // If match is found, return
         if (vin_txid.get_str() == utxoPrevTxId && vin_vout.get_int() == utxoVoutN) {
@@ -1831,13 +1845,13 @@ bool BtcWalletConnector<CryptoProvider>::getTransactionsInBlock(const std::strin
         return false;
     }
 
-    json_spirit::Value jblock;
-    if (!json_spirit::read_string(json, jblock))
+    UniValue jblock;
+    if (!jblock.read(json))
     {
         LOG() << "json read error for " << blockHash << " " << __FUNCTION__;
         return false;
     }
-    if (jblock.type() != json_spirit::obj_type)
+    if (!jblock.isObject())
     {
         LOG() << "json read error for " << blockHash << " " << __FUNCTION__;
         return false;
@@ -1846,8 +1860,8 @@ bool BtcWalletConnector<CryptoProvider>::getTransactionsInBlock(const std::strin
     txids.clear();
 
     auto & jblocko = jblock.get_obj();
-    auto & txs = json_spirit::find_value(jblocko, "tx").get_array();
-    for (auto & tx : txs) {
+    const UniValue & txs = find_value(jblocko, "tx").get_array();
+    for (const auto & tx : txs.getValues()) {
         auto & txid = tx.get_str();
         txids.push_back(txid);
     }
@@ -2006,22 +2020,22 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
     }
 
     // check confirmations
-    json_spirit::Value txv;
-    if (!json_spirit::read_string(rawtx, txv))
+    UniValue txv;
+    if (!txv.read(rawtx))
     {
         LOG() << "json read error for " << depositTxId << " " << rawtx << " ...waiting " << __FUNCTION__;
         return false;
     }
 
-    json_spirit::Object txo = txv.get_obj();
+    UniValue txo = txv.get_obj();
 
     if (requiredConfirmations > 0)
     {
         uint32_t confs{0};
 
         // Check for confirmations in raw transaction output
-        json_spirit::Value txvConfCount = json_spirit::find_value(txo, "confirmations");
-        if (txvConfCount.type() != json_spirit::int_type) { // If not found check gettxout for confirmations
+        UniValue txvConfCount = find_value(txo, "confirmations");
+        if (!txvConfCount.isNum()) { // If not found check gettxout for confirmations
             wallet::UtxoEntry utxo;
             utxo.txId = depositTxId;
             utxo.vout = depositTxVout;
@@ -2047,32 +2061,32 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
     // Ensure p2sh accounts for fees
 
     // Check vins
-    json_spirit::Value vinso = json_spirit::find_value(txo, "vin");
-    if (vinso.type() != json_spirit::array_type || vinso.get_array().empty()) {
+    UniValue vinso = find_value(txo, "vin");
+    if (!vinso.isArray() || vinso.get_array().empty()) {
         LOG() << "tx " << depositTxId << " no vins " << __FUNCTION__;
         return true; // done
     }
-    json_spirit::Array vins = vinso.get_array();
+    const UniValue & vins = vinso.get_array();
 
     // Check vouts
-    json_spirit::Value voutso = json_spirit::find_value(txo, "vout");
-    if (voutso.type() != json_spirit::array_type || voutso.get_array().empty()) {
+    UniValue voutso = find_value(txo, "vout");
+    if (!voutso.isArray() || voutso.get_array().empty()) {
         LOG() << "tx " << depositTxId << " no vouts " << __FUNCTION__;
         return true; // done
     }
-    json_spirit::Array vouts = voutso.get_array();
+    const UniValue & vouts = voutso.get_array();
 
     // Add up all vin amounts (prevouts)
     double totalVinAmount{0};
-    for (auto & vin : vins) {
-        const json_spirit::Value & txidObj = json_spirit::find_value(vin.get_obj(), "txid");
-        if (txidObj.type() != json_spirit::str_type) {
+    for (const auto & vin : vins.getValues()) {
+        const UniValue & txidObj = find_value(vin.get_obj(), "txid");
+        if (!txidObj.isStr()) {
             LOG() << "tx " << depositTxId << " bad vin txid " << __FUNCTION__;
             return true; // done
         }
-        const json_spirit::Value & txSequence = json_spirit::find_value(vin.get_obj(), "sequence");
-        if (txSequence.type() != json_spirit::null_type) { // if sequence is available, then enforce
-            if (txSequence.type() != json_spirit::int_type) {
+        const UniValue & txSequence = find_value(vin.get_obj(), "sequence");
+        if (!txSequence.isNull()) { // if sequence is available, then enforce
+            if (!txSequence.isNum()) {
                 LOG() << "tx " << depositTxId << " bad sequence type " << __FUNCTION__;
                 return true; // done
             } else if (txSequence.get_int64() != xbridge::SEQUENCE_FINAL) {
@@ -2082,8 +2096,8 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
                 return true; // done
             }
         }
-        const json_spirit::Value & txVoutObj = json_spirit::find_value(vin.get_obj(), "vout");
-        if (txVoutObj.type() != json_spirit::int_type) {
+        const UniValue & txVoutObj = find_value(vin.get_obj(), "vout");
+        if (!txVoutObj.isNum()) {
             LOG() << "tx " << depositTxId << " bad input vout " << __FUNCTION__;
             return true; // done
         }
@@ -2095,23 +2109,23 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
             LOG() << "vin tx not found for deposit " << depositTxId << " vin txid: " << vinTxId << " ...waiting " << __FUNCTION__;
             return false;
         }
-        json_spirit::Value vinTxv;
-        if (!json_spirit::read_string(vinTx, vinTxv)) {
+        UniValue vinTxv;
+        if (!vinTxv.read(vinTx)) {
             LOG() << "vin json read error for deposit " << depositTxId << " vin raw tx: " << vinTx << " ...waiting " << __FUNCTION__;
             return false;
         }
-        json_spirit::Object vinTxo = vinTxv.get_obj();
-        json_spirit::Array vinOuts = json_spirit::find_value(vinTxo, "vout").get_array();
+        UniValue vinTxo = vinTxv.get_obj();
+        const UniValue & vinOuts = find_value(vinTxo, "vout").get_array();
         if (vinOuts.empty() || vinTxVout >= static_cast<int>(vinOuts.size())) {
             LOG() << "tx " << depositTxId << " bad vin, missing outputs " << __FUNCTION__;
             return true; // done
         }
         bool foundVout{false};
         double vinAmount{0};
-        for (const auto & vout : vinOuts) {
-            const json_spirit::Value & valObj = json_spirit::find_value(vout.get_obj(), "value");
-            const json_spirit::Value & nObj = json_spirit::find_value(vout.get_obj(), "n");
-            if (valObj.type() != json_spirit::real_type || nObj.type() != json_spirit::int_type)
+        for (const auto & vout : vinOuts.getValues()) {
+            const UniValue & valObj = find_value(vout.get_obj(), "value");
+            const UniValue & nObj = find_value(vout.get_obj(), "n");
+            if (!valObj.isNum() || !nObj.isNum())
                 continue;
             if (nObj.get_int() == vinTxVout) {
                 vinAmount = valObj.get_real();
@@ -2129,14 +2143,14 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
     // Add up all vout amounts
     double totalVoutAmount{0};
     double depositP2SHAmount{0};
-    for (auto & vout : vouts) {
-        const json_spirit::Value & amountObj = json_spirit::find_value(vout.get_obj(), "value");
-        if (amountObj.type() != json_spirit::real_type) {
+    for (const auto & vout : vouts.getValues()) {
+        const UniValue & amountObj = find_value(vout.get_obj(), "value");
+        if (!amountObj.isNum()) {
             LOG() << "tx " << depositTxId << " bad vout amount " << __FUNCTION__;
             return true; // done
         }
-        const json_spirit::Value & nObj = json_spirit::find_value(vout.get_obj(), "n");
-        if (nObj.type() != json_spirit::int_type) {
+        const UniValue & nObj = find_value(vout.get_obj(), "n");
+        if (!nObj.isNum()) {
             LOG() << "tx " << depositTxId << " bad vout n " << __FUNCTION__;
             return true; // done
         }
@@ -2147,15 +2161,15 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
         totalVoutAmount += amountObj.get_real();
 
         // Check all vouts for valid deposit
-        const json_spirit::Value & scriptPubKey = json_spirit::find_value(vout.get_obj(), "scriptPubKey");
-        const json_spirit::Value & hex = json_spirit::find_value(scriptPubKey.get_obj(), "hex");
-        if (scriptPubKey.type() == json_spirit::null_type || hex.type() == json_spirit::null_type)
+        const UniValue & scriptPubKey = find_value(vout.get_obj(), "scriptPubKey");
+        const UniValue & hex = find_value(scriptPubKey.get_obj(), "hex");
+        if (scriptPubKey.isNull() || hex.isNull())
             continue;
 
         // Check that expected script and amounts match
         if (expectedScript == hex.get_str()) {
-            const json_spirit::Value & vamount = json_spirit::find_value(vout.get_obj(), "value");
-            const json_spirit::Value & n = json_spirit::find_value(vout.get_obj(), "n");
+            const UniValue & vamount = find_value(vout.get_obj(), "value");
+            const UniValue & n = find_value(vout.get_obj(), "n");
             if (amount <= vamount.get_real() + std::numeric_limits<double>::epsilon()) {
                 depositP2SHAmount = vamount.get_real();
                 depositTxVout = static_cast<uint32_t>(n.get_int());
@@ -2225,37 +2239,37 @@ bool BtcWalletConnector<CryptoProvider>::getSecretFromPaymentTransaction(const s
         return false;
     }
 
-    json_spirit::Value txv;
-    if (!json_spirit::read_string(rawtx, txv))
+    UniValue txv;
+    if (!txv.read(rawtx))
     {
         LOG() << "json read error for " << paymentTxId << " " << rawtx << " " << __FUNCTION__;
         return false;
     }
 
-    json_spirit::Object txo = txv.get_obj();
+    UniValue txo = txv.get_obj();
 
     // extract secret from vins
-    json_spirit::Array vins = json_spirit::find_value(txo, "vin").get_array();
+    const UniValue & vins = find_value(txo, "vin").get_array();
 
     // Check all vins for secret
-    for (auto & vin : vins) {
-        const json_spirit::Value & depositId = json_spirit::find_value(vin.get_obj(), "txid");
-        if (depositId.type() == json_spirit::null_type)
+    for (const auto & vin : vins.getValues()) {
+        const UniValue & depositId = find_value(vin.get_obj(), "txid");
+        if (depositId.isNull())
             continue;
 
-        const json_spirit::Value & voutN = json_spirit::find_value(vin.get_obj(), "vout");
-        if (voutN.type() == json_spirit::null_type)
+        const UniValue & voutN = find_value(vin.get_obj(), "vout");
+        if (voutN.isNull())
             continue;
 
         if (depositId.get_str() != depositTxId || voutN.get_int() != depositTxVOut)
             continue;
 
-        const json_spirit::Value & scriptPubKey = json_spirit::find_value(vin.get_obj(), "scriptSig");
-        if (scriptPubKey.type() == json_spirit::null_type)
+        const UniValue & scriptPubKey = find_value(vin.get_obj(), "scriptSig");
+        if (scriptPubKey.isNull())
             continue;
 
-        const json_spirit::Value & hex = json_spirit::find_value(scriptPubKey.get_obj(), "hex");
-        if (hex.type() == json_spirit::null_type)
+        const UniValue & hex = find_value(scriptPubKey.get_obj(), "hex");
+        if (hex.isNull())
             continue;
 
         auto ssig = ParseHex(hex.get_str());
@@ -2371,10 +2385,10 @@ bool BtcWalletConnector<CryptoProvider>::createDepositUnlockScript(const std::ve
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createDepositTransaction(const std::vector<XTxIn> & inputs,
-                                                                  const std::vector<std::pair<std::string, double> > & outputs,
-                                                                  std::string & txId,
-                                                                  uint32_t & txVout,
-                                                                  std::string & rawTx)
+                                                                   const std::vector<std::pair<std::string, std::string> > & outputs,
+                                                                   std::string & txId,
+                                                                   uint32_t & txVout,
+                                                                   std::string & rawTx)
 {
     if (!rpc::createRawTransaction(m_user, m_passwd, m_ip, m_port,
                                    inputs, outputs, 0, rawTx, true))
@@ -2424,7 +2438,7 @@ xbridge::CTransactionPtr createTransaction(const bool txWithTimeField)
 //******************************************************************************
 xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
                                            const std::vector<XTxIn> & inputs,
-                                           const std::vector<std::pair<std::string, double> >  & outputs,
+                                           const std::vector<std::pair<std::string, CAmount> >  & outputs,
                                            const uint64_t COIN,
                                            const uint32_t txversion,
                                            const uint32_t lockTime,
@@ -2439,14 +2453,14 @@ xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
         tx->vin.push_back(CTxIn(COutPoint(uint256S(in.txid), in.n)));
     }
 
-    for (const std::pair<std::string, double> & out : outputs)
+    for (const std::pair<std::string, CAmount> & out : outputs)
     {
         std::vector<unsigned char> id = conn.toXAddr(out.first);
 
         CScript scr;
         scr << OP_DUP << OP_HASH160 << ToByteVector(id) << OP_EQUALVERIFY << OP_CHECKSIG;
 
-        tx->vout.push_back(CTxOut(out.second * COIN, scr));
+        tx->vout.push_back(CTxOut(out.second, scr));
     }
 
     return tx;
@@ -2456,7 +2470,7 @@ xbridge::CTransactionPtr createTransaction(const WalletConnector & conn,
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createRefundTransaction(const std::vector<XTxIn> & inputs,
-                                                                 const std::vector<std::pair<std::string, double> > & outputs,
+                                                                 const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                                  const std::vector<unsigned char> & mpubKey,
                                                                  const std::vector<unsigned char> & mprivKey,
                                                                  const std::vector<unsigned char> & innerScript,
@@ -2516,7 +2530,7 @@ bool BtcWalletConnector<CryptoProvider>::createRefundTransaction(const std::vect
     {
         LOG() << "decode signed transaction error, transaction canceled " << __FUNCTION__;
 //            sendCancelTransaction(xtx, crRpcError);
-            return true;
+            return false;
     }
 
     txId  = reftxid;
@@ -2528,7 +2542,7 @@ bool BtcWalletConnector<CryptoProvider>::createRefundTransaction(const std::vect
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createPaymentTransaction(const std::vector<XTxIn> & inputs,
-                                                                  const std::vector<std::pair<std::string, double> > & outputs,
+                                                                  const std::vector<std::pair<std::string, CAmount> > & outputs,
                                                                   const std::vector<unsigned char> & mpubKey,
                                                                   const std::vector<unsigned char> & mprivKey,
                                                                   const std::vector<unsigned char> & xpubKey,
@@ -2580,7 +2594,7 @@ bool BtcWalletConnector<CryptoProvider>::createPaymentTransaction(const std::vec
     {
             LOG() << "decode signed transaction error, transaction canceled " << __FUNCTION__;
 //                sendCancelTransaction(xtx, crRpcError);
-        return true;
+        return false;
     }
 
     txId  = paytxid;
@@ -2592,7 +2606,7 @@ bool BtcWalletConnector<CryptoProvider>::createPaymentTransaction(const std::vec
 //******************************************************************************
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::createPartialTransaction(const std::vector<XTxIn> inputs,
-                                                                  const std::vector<std::pair<std::string, double> > outputs,
+                                                                  const std::vector<std::pair<std::string, CAmount> > outputs,
                                                                   std::string & txId, std::string & rawTx)
 {
     xbridge::CTransactionPtr tx = createTransaction(*this, inputs, outputs, COIN, txVersion, 0, txWithTimeField);
@@ -2688,7 +2702,7 @@ bool BtcWalletConnector<CryptoProvider>::splitUtxos(const CAmount splitAmount, c
     std::vector<xbridge::XTxIn> vins;
     for (const auto & vin : unspent) {
         vinsTotal += vin.camount();
-        vins.emplace_back(vin.txId, vin.vout, vin.amount);
+        vins.emplace_back(vin.txId, vin.vout, xBridgeWalletSatsFromReal(vin.amount, COIN));
     }
 
     auto outputCount = static_cast<int>(vinsTotal / splitSize);
@@ -2738,9 +2752,9 @@ bool BtcWalletConnector<CryptoProvider>::splitUtxos(const CAmount splitAmount, c
         return false;
     }
 
-    std::vector<std::pair<std::string, double>> dvouts;
+    std::vector<std::pair<std::string, CAmount>> dvouts;
     for (auto & vout : vouts)
-        dvouts.emplace_back(vout.first, xBridgeValueFromAmount(vout.second));
+        dvouts.emplace_back(vout.first, xBridgeDescrToSats(vout.second, COIN));
     xbridge::CTransactionPtr tx = createTransaction(*this, vins, dvouts, COIN, txVersion, 0, txWithTimeField);
     rawTx = tx->toString();
 

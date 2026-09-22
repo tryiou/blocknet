@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <script/sigcache.h>
+#include <algorithm>
 
 #include <memusage.h>
 #include <pubkey.h>

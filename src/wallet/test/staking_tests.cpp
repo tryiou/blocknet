@@ -677,6 +677,11 @@ BOOST_FIXTURE_TEST_CASE(staking_tests_stakes, TestChainPoS)
         }
     }
 
+    // The fork chains above consumed wallet UTXOs; rescan so the staker's
+    // selections can no longer hand back already-spent coins (the wallet's
+    // available-coins view can lag the chain until it syncs).
+    scanWalletTxs(wallet.get());
+
     // Check stakes meet v6 staking protocol
     {
         CBlock block;
@@ -704,6 +709,10 @@ BOOST_FIXTURE_TEST_CASE(staking_tests_stakes, TestChainPoS)
         BOOST_CHECK(currentIndex1 != chainActive.Tip()); // chain tip should not match previous
         BOOST_CHECK_EQUAL(block.GetHash(), chainActive.Tip()->GetBlockHash()); // block should be accepted
         BOOST_CHECK_MESSAGE(g_txindex->BestBlockIndex()->GetBlockHash() == chainActive.Tip()->GetBlockHash(), "global txindex failed to update on stake");
+        // The accepted stake consumed a wallet UTXO; rescan so the staker's
+        // later selections can no longer hand back the now-spent coin.
+        SyncWithValidationInterfaceQueue();
+        scanWalletTxs(wallet.get());
     }
 
     // Check stakes meet v6 staking protocol, block submitted with timestamp prior to the
@@ -730,6 +739,11 @@ BOOST_FIXTURE_TEST_CASE(staking_tests_stakes, TestChainPoS)
     // Check -staketoaddress
     {
         CKey stakeToKey; stakeToKey.MakeNewKey(true);
+        // The accepted stake in the previous section consumed a wallet UTXO;
+        // rescan so findStake cannot return the now-spent coin (its direct
+        // CreateNewBlockPoS call does not tolerate stale candidates).
+        SyncWithValidationInterfaceQueue();
+        scanWalletTxs(wallet.get());
         BOOST_CHECK(wallet->LoadKey(stakeToKey, stakeToKey.GetPubKey()));
         gArgs.ForceSetArg("-staketoaddress", EncodeDestination(GetDestinationForKey(stakeToKey.GetPubKey(), OutputType::LEGACY)));
         StakeMgr::StakeCoin nextStake;

@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/blocknetdashboard.h>
+#include <algorithm>
 
 #include <qt/blocknethdiv.h>
 #include <qt/blockneticonbtn.h>

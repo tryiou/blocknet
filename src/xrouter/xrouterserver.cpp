@@ -16,9 +16,6 @@
 #include <chrono>
 #include <future>
 
-#include <json/json_spirit_reader_template.h>
-#include <json/json_spirit_writer_template.h>
-#include <json/json_spirit_utils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
@@ -408,16 +405,16 @@ void XRouterServer::onMessageReceived(CNode* node, XRouterPacketPtr packet, CVal
 
     } catch (XRouterError & e) {
         LOG() << e.msg;
-        Object error;
-        error.emplace_back("error", e.msg);
-        error.emplace_back("code", e.code);
-        reply = json_spirit::write_string(Value(error), true);
+        UniValue error(UniValue::VOBJ);
+        error.pushKV("error", e.msg);
+        error.pushKV("code", static_cast<int>(e.code));
+        reply = error.write();
     } catch (std::exception & e) {
         LOG() << "Exception: " << e.what();
-        Object error;
-        error.emplace_back("error", "Internal Server Error");
-        error.emplace_back("code", xrouter::INTERNAL_SERVER_ERROR);
-        reply = json_spirit::write_string(Value(error), true);
+        UniValue error(UniValue::VOBJ);
+        error.pushKV("error", "Internal Server Error");
+        error.pushKV("code", static_cast<int>(xrouter::INTERNAL_SERVER_ERROR));
+        reply = error.write();
     }
 
     sendPacketToClient(uuid, reply, node);
@@ -583,7 +580,7 @@ std::vector<std::string> XRouterServer::processGetTxBloomFilter(const std::strin
 std::string XRouterServer::processGenerateBloomFilter(const std::string & currency, const std::vector<std::string> & params) {
     CBloomFilter f(10 * static_cast<unsigned int>(params.size()), 0.1, 5, 0);
 
-    Object result;
+    UniValue result(UniValue::VOBJ);
     // TODO Blocknet XRouter fixme
 //    Array invalid;
 //
@@ -617,7 +614,7 @@ std::string XRouterServer::processGenerateBloomFilter(const std::string & curren
 //        result.emplace_back("code", xrouter::INVALID_PARAMETERS);
 //    }
 
-    return json_spirit::write_string(Value(result), true);
+    return result.write();
 }
 
 std::string XRouterServer::processConvertTimeToBlockCount(const std::string & currency, const std::vector<std::string> & params) {
@@ -653,7 +650,7 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
                 params.size(), expectedParams.size()), INVALID_PARAMETERS);
 
     if (callType == "rpc") {
-        Array jsonparams;
+        UniValue jsonparams(UniValue::VARR);
         for (int i = 0; i < static_cast<int>(expectedParams.size()); ++i) {
             const auto & p = expectedParams[i];
             const auto & rec = params[i];
@@ -711,6 +708,13 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
             ERR() << "Failed to run plugin " + name + " \"command\" cannot be empty";
             throw XRouterError("Internal Server Error in command " + name, INTERNAL_SERVER_ERROR);
         }
+        // Docker container and executable are interpolated into a shell
+        // command; require a safe charset (defense in depth even though
+        // these come from the node's own plugin config).
+        if (!isShellSafe(container) || !isShellSafe(exe)) {
+            ERR() << "Failed to run plugin " + name + " \"containername\"/\"command\" contain forbidden characters";
+            throw XRouterError("Internal Server Error in command " + name, INTERNAL_SERVER_ERROR);
+        }
         if (psettings->commandArgs().empty() && expectedParams.size() > 0) {
             ERR() << "Failed to run plugin " + name + " \"args\" cannot be empty when parameters= is set";
             throw XRouterError("Internal Server Error in command " + name, INTERNAL_SERVER_ERROR);
@@ -725,10 +729,19 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
             const auto & arg = "$" + std::to_string(i + 1);
             std::string argv;
 
-            if (psettings->quoteArgs())
+            if (psettings->quoteArgs()) {
+                if (!isShellQuotedSafe(rec)) {
+                    ERR() << "Plugin " + name + " parameter " + std::to_string(i + 1) + " contains forbidden characters";
+                    throw XRouterError("Parameter " + std::to_string(i + 1) + " contains forbidden characters", INVALID_PARAMETERS);
+                }
                 argv = std::string("\""+rec+"\"");
-            else
+            } else {
+                if (!isShellSafe(rec)) {
+                    ERR() << "Plugin " + name + " parameter " + std::to_string(i + 1) + " contains forbidden characters";
+                    throw XRouterError("Parameter " + std::to_string(i + 1) + " contains forbidden characters", INVALID_PARAMETERS);
+                }
                 argv = rec;
+            }
 
             size_t pos;
             replace(cmdargs, pos, spos, arg, argv);
@@ -740,22 +753,23 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
         // Insert docker command info
         const auto & cmd = strprintf("docker exec %s %s %s", container, exe, cmdargs);
 
-        // parses the container result into Value
-        auto parseR = [](const std::string & res) -> Value {
-            Value cmd_val;
+        // parses the container result into UniValue
+        auto parseR = [](const std::string & res) -> UniValue {
+            UniValue cmd_val;
             try {
-                json_spirit::read_string(res, cmd_val);
+                if (!cmd_val.read(res))
+                    throw std::runtime_error("failed to parse plugin response");
             } catch (...) { // ignore errors on json parse
                 throw XRouterError("Failed to read the plugin response data", INTERNAL_SERVER_ERROR);
             }
-            if (cmd_val.type() != null_type)
+            if (!cmd_val.isNull())
                 return cmd_val;
             else
-                return Value(res); // raw string
+                return UniValue(res); // raw string
         };
 
         LOG() << "Executing docker plugin " << name << " with command: " << cmd;
-        Value val;
+        UniValue val;
         int nexit;
         const auto & r = CallCMD(cmd, nexit);
         if (nexit != 0) {
@@ -763,9 +777,9 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
                   << cmd << "\n" << r;
             if (nexit == 1 || nexit == 2 || (nexit >= 126 && nexit <= 165) || nexit == 255)
                 throw std::runtime_error("Failed to execute command " + name);
-            Value r_val = parseR(r);
-            Object o; o.emplace_back("error", r_val);
-            val = Value(o);
+            UniValue r_val = parseR(r);
+            UniValue o(UniValue::VOBJ); o.pushKV("error", r_val);
+            val = std::move(o);
         } else {
             val = parseR(r);
         }
@@ -773,7 +787,7 @@ std::string XRouterServer::processServiceCall(const std::string & name, const st
         if (psettings->hasCustomResponse())
             return psettings->customResponse();
         else
-            return json_spirit::write_string(val, false);
+            return val.write();
 
     } else if (callType == "url") {
         throw XRouterError("url calls are unsupported at this time", UNSUPPORTED_SERVICE);
@@ -800,10 +814,10 @@ std::string XRouterServer::processFetchReply(const std::string & uuid) {
     if (hasQuery(uuid))
         return getQuery(uuid);
     else {
-        Object error;
-        error.emplace_back("error", "Unknown query id: " + uuid);
-        error.emplace_back("code", xrouter::INVALID_PARAMETERS);
-        return json_spirit::write_string(Value(error), true);
+        UniValue error(UniValue::VOBJ);
+        error.pushKV("error", "Unknown query id: " + uuid);
+        error.pushKV("code", static_cast<int>(xrouter::INVALID_PARAMETERS));
+        return error.write();
     }
 }
 

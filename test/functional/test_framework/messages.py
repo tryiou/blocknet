@@ -60,16 +60,16 @@ def sha256(s):
 def hash256(s):
     return sha256(sha256(s))
 
-def ser_compact_size(l):
+def ser_compact_size(length):
     r = b""
-    if l < 253:
-        r = struct.pack("B", l)
-    elif l < 0x10000:
-        r = struct.pack("<BH", 253, l)
-    elif l < 0x100000000:
-        r = struct.pack("<BI", 254, l)
+    if length < 253:
+        r = struct.pack("B", length)
+    elif length < 0x10000:
+        r = struct.pack("<BH", 253, length)
+    elif length < 0x100000000:
+        r = struct.pack("<BI", 254, length)
     else:
-        r = struct.pack("<BQ", 255, l)
+        r = struct.pack("<BQ", 255, length)
     return r
 
 def deser_compact_size(f):
@@ -132,9 +132,9 @@ def deser_vector(f, c):
 # ser_function_name: Allow for an alternate serialization function on the
 # entries in the vector (we use this for serializing the vector of transactions
 # for a witness block).
-def ser_vector(l, ser_function_name=None):
-    r = ser_compact_size(len(l))
-    for i in l:
+def ser_vector(vec, ser_function_name=None):
+    r = ser_compact_size(len(vec))
+    for i in vec:
         if ser_function_name:
             r += getattr(i, ser_function_name)()
         else:
@@ -151,9 +151,9 @@ def deser_uint256_vector(f):
     return r
 
 
-def ser_uint256_vector(l):
-    r = ser_compact_size(len(l))
-    for i in l:
+def ser_uint256_vector(vec):
+    r = ser_compact_size(len(vec))
+    for i in vec:
         r += ser_uint256(i)
     return r
 
@@ -167,9 +167,9 @@ def deser_string_vector(f):
     return r
 
 
-def ser_string_vector(l):
-    r = ser_compact_size(len(l))
-    for sv in l:
+def ser_string_vector(vec):
+    r = ser_compact_size(len(vec))
+    for sv in vec:
         r += ser_string(sv)
     return r
 
@@ -1331,16 +1331,16 @@ class msg_reject:
         self.message = deser_string(f)
         self.code = struct.unpack("<B", f.read(1))[0]
         self.reason = deser_string(f)
-        if (self.code != self.REJECT_MALFORMED and
-                (self.message == b"block" or self.message == b"tx")):
+        if (self.code != self.REJECT_MALFORMED
+                and (self.message == b"block" or self.message == b"tx")):
             self.data = deser_uint256(f)
 
     def serialize(self):
         r = ser_string(self.message)
         r += struct.pack("<B", self.code)
         r += ser_string(self.reason)
-        if (self.code != self.REJECT_MALFORMED and
-                (self.message == b"block" or self.message == b"tx")):
+        if (self.code != self.REJECT_MALFORMED
+                and (self.message == b"block" or self.message == b"tx")):
             r += ser_uint256(self.data)
         return r
 
