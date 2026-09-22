@@ -16,6 +16,7 @@ make assumptions about execution order.
 from decimal import Decimal
 import io
 
+from test_framework.authproxy import JSONRPCException
 from test_framework.blocktools import add_witness_commitment, create_block, create_coinbase, send_to_witness
 from test_framework.messages import BIP125_SEQUENCE_NUMBER, CTransaction
 from test_framework.test_framework import BitcoinTestFramework
@@ -24,13 +25,20 @@ from test_framework.util import assert_equal, assert_greater_than, assert_raises
 WALLET_PASSPHRASE = "test"
 WALLET_PASSPHRASE_TIMEOUT = 3600
 
+# External Blocknet regtest mining destination (see wallet_basic.py): used
+# where the test needs confirmations without polluting wallet balances
+# (Blocknet's getbalance counts immature coinbases).
+EXT_MINING_ADDRESS = 'yJxd9XBcK8mg9dLoqe3zHrBgetwfZ895VV'
+
 class BumpFeeTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.setup_clean_chain = True
         self.extra_args = [[
             "-walletrbf={}".format(i),
-            "-mintxfee=0.00002",
+            # Blocknet: wallet min fee must exceed min relay fee (0.0001/kB)
+            # for the wallet-min-fee branch of settxfee to be reachable.
+            "-mintxfee=0.0002",
         ] for i in range(self.num_nodes)]
 
     def skip_test_if_missing_module(self):
@@ -192,7 +200,9 @@ def test_dust_to_fee(rbf_node, dest_address):
 
 def test_settxfee(rbf_node, dest_address):
     assert_raises_rpc_error(-8, "txfee cannot be less than min relay tx fee", rbf_node.settxfee, Decimal('0.000005'))
-    assert_raises_rpc_error(-8, "txfee cannot be less than wallet min fee", rbf_node.settxfee, Decimal('0.000015'))
+    # Blocknet: 0.00015/kB passes min relay (0.0001) but not wallet min fee
+    # (0.0002 via -mintxfee above).
+    assert_raises_rpc_error(-8, "txfee cannot be less than wallet min fee", rbf_node.settxfee, Decimal('0.00015'))
     # check that bumpfee reacts correctly to the use of settxfee (paytxfee)
     rbfid = spend_one_input(rbf_node, dest_address)
     requested_feerate = Decimal("0.00025000")
@@ -206,20 +216,24 @@ def test_settxfee(rbf_node, dest_address):
 
 
 def test_maxtxfee_fails(test, rbf_node, dest_address):
-    test.restart_node(1, ['-maxtxfee=0.00003'] + test.extra_args[1])
+    # Blocknet: maxtxfee must clear the min-relay gate at startup
+    # (CFeeRate(maxtxfee, 1000) >= minRelayTxFee = 0.0001/kB), so use an
+    # explicit totalFee above it instead of relying on the auto fee.
+    test.restart_node(1, ['-maxtxfee=0.0001'] + test.extra_args[1])
     rbf_node.walletpassphrase(WALLET_PASSPHRASE, WALLET_PASSPHRASE_TIMEOUT)
     rbfid = spend_one_input(rbf_node, dest_address)
-    assert_raises_rpc_error(-4, "Specified or calculated fee 0.0000332 is too high (cannot be higher than maxTxFee 0.00003)", rbf_node.bumpfee, rbfid)
+    assert_raises_rpc_error(-4, "Specified or calculated fee 0.0002 is too high (cannot be higher than maxTxFee 0.0001)", rbf_node.bumpfee, rbfid, {"totalFee": 20000})
     test.restart_node(1, test.extra_args[1])
     rbf_node.walletpassphrase(WALLET_PASSPHRASE, WALLET_PASSPHRASE_TIMEOUT)
 
 
 def test_rebumping(rbf_node, dest_address):
     # check that re-bumping the original tx fails, but bumping the bumper succeeds
+    # Blocknet: fees scaled ×10 vs Core (min relay 10000 sat/kB).
     rbfid = spend_one_input(rbf_node, dest_address)
-    bumped = rbf_node.bumpfee(rbfid, {"totalFee": 2000})
-    assert_raises_rpc_error(-4, "already bumped", rbf_node.bumpfee, rbfid, {"totalFee": 3000})
-    rbf_node.bumpfee(bumped["txid"], {"totalFee": 3000})
+    bumped = rbf_node.bumpfee(rbfid, {"totalFee": 20000})
+    assert_raises_rpc_error(-4, "already bumped", rbf_node.bumpfee, rbfid, {"totalFee": 30000})
+    rbf_node.bumpfee(bumped["txid"], {"totalFee": 30000})
 
 
 def test_rebumping_not_replaceable(rbf_node, dest_address):
@@ -247,10 +261,10 @@ def test_unconfirmed_not_spendable(rbf_node, rbf_node_address):
     # then invalidate the block so the rbf tx will be put back in the mempool.
     # This makes it possible to check whether the rbf tx outputs are
     # spendable before the rbf tx is confirmed.
-    block = submit_block_with_tx(rbf_node, rbftx)
+    blockhash = submit_block_with_tx(rbf_node, rbftx)
     # Can not abandon conflicted tx
     assert_raises_rpc_error(-5, 'Transaction not eligible for abandonment', lambda: rbf_node.abandontransaction(txid=bumpid))
-    rbf_node.invalidateblock(block.hash)
+    rbf_node.invalidateblock(blockhash)
     # Call abandon to make sure the wallet doesn't attempt to resubmit
     # the bump tx and hope the wallet does not rebroadcast before we call.
     rbf_node.abandontransaction(bumpid)
@@ -270,8 +284,24 @@ def test_unconfirmed_not_spendable(rbf_node, rbf_node_address):
 
 
 def test_bumpfee_metadata(rbf_node, dest_address):
-    rbfid = rbf_node.sendtoaddress(dest_address, Decimal("0.00100000"), "comment value", "to value")
+    # Blocknet: pin an explicit fee rate so the wallet builds a change output
+    # deterministically. Without it, fee estimation on a sparse regtest chain
+    # can pick a fee that exactly consumes the remainder (no change), and
+    # bumpfee requires a change output. Rate must clear wallet min fee
+    # (0.0002/kB via -mintxfee); sending 0.0008 leaves ~15500 sats change,
+    # safely above dust.
+    rbf_node.settxfee(Decimal("0.00020000"))
+    # Blocknet: lock sub-0.001 coins so selection must spend a whole 0.001
+    # UTXO. Otherwise BnB keeps finding exact input matches in the small-change
+    # soup, leaving no change output for bumpfee to work with.
+    small_utxos = [{"txid": u["txid"], "vout": u["vout"]} for u in rbf_node.listunspent(0) if u["amount"] < Decimal("0.001")]
+    if small_utxos:
+        rbf_node.lockunspent(False, small_utxos)
+    rbfid = rbf_node.sendtoaddress(dest_address, Decimal("0.00080000"), "comment value", "to value")
     bumped_tx = rbf_node.bumpfee(rbfid)
+    rbf_node.settxfee(Decimal("0.00000000"))  # unset paytxfee
+    if small_utxos:
+        rbf_node.lockunspent(True, small_utxos)
     bumped_wtx = rbf_node.gettransaction(bumped_tx["txid"])
     assert_equal(bumped_wtx["comment"], "comment value")
     assert_equal(bumped_wtx["to"], "to value")
@@ -287,9 +317,11 @@ def test_locked_wallet_fails(rbf_node, dest_address):
 def spend_one_input(node, dest_address):
     tx_input = dict(
         sequence=BIP125_SEQUENCE_NUMBER, **next(u for u in node.listunspent() if u["amount"] == Decimal("0.00100000")))
+    # Blocknet: min relay fee is 10000 sat/kB (not 1000), so this ~225-vB tx
+    # needs >= ~2250 sats fee. Use 3000 sats (was 1000 on Core).
     rawtx = node.createrawtransaction(
         [tx_input], {dest_address: Decimal("0.00050000"),
-                     node.getrawchangeaddress(): Decimal("0.00049000")})
+                     node.getrawchangeaddress(): Decimal("0.00047000")})
     signedtx = node.signrawtransactionwithwallet(rawtx)
     txid = node.sendrawtransaction(signedtx["hex"])
     return txid
@@ -302,14 +334,41 @@ def submit_block_with_tx(node, tx):
     tip = node.getbestblockhash()
     height = node.getblockcount() + 1
     block_time = node.getblockheader(tip)["mediantime"] + 1
-    block = create_block(int(tip, 16), create_coinbase(height), block_time)
+    block = create_block(int(tip, 16), create_coinbase(height), block_time, version=3)  # Blocknet rejects nVersion < 3
     block.vtx.append(ctx)
     block.rehash()
     block.hashMerkleRoot = block.calc_merkle_root()
     add_witness_commitment(block)
-    block.solve()
-    node.submitblock(bytes_to_hex_str(block.serialize(True)))
-    return block
+    # Blocknet: the serialized header carries 76 extra stake bytes
+    # (hashStake/nStakeIndex/nStakeAmount/hashStakeBlock, null for PoW
+    # blocks). Core-format submission fails decode, so splice them in.
+    # Regtest PoW is verified against the Quark header hash with a trivial
+    # target, which the framework cannot grind (it does SHA256d): retry with
+    # fresh nonces until accepted (~50% per try).
+    raw = bytes_to_hex_str(block.serialize())
+    assert len(raw) > 160
+    header, body = raw[:160], raw[160:]
+    stake_fields = '00' * 76
+    last_error = None
+    # NOTE: submitblock returns None on acceptance but a BIP22 rejection
+    # string (e.g. 'high-hash') instead of raising, so both outcomes must be
+    # treated as "not accepted yet". On success the hash is read back via
+    # getblockhash (nothing else was mined in the meantime).
+    for _ in range(40):
+        try:
+            result = node.submitblock(header + stake_fields + body)
+        except JSONRPCException as e:
+            last_error = e
+        else:
+            if result is None:
+                return node.getblockhash(height)
+            last_error = JSONRPCException({'code': -22, 'message': str(result)})
+        block.nNonce += 1
+        block.nTime += 1
+        block.rehash()
+        raw = bytes_to_hex_str(block.serialize())
+        header, body = raw[:160], raw[160:]
+    raise last_error
 
 
 if __name__ == "__main__":

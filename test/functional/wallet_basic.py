@@ -18,6 +18,12 @@ from test_framework.util import (
     wait_until,
 )
 
+# External Blocknet regtest address used as mining destination where the test
+# needs confirmations without polluting wallet balances: Blocknet's getbalance
+# deliberately includes immature coinbases, so mining to self would break exact
+# balance assertions. (Seed generates that fund the wallets still mine to self.)
+EXT_MINING_ADDRESS = 'yJxd9XBcK8mg9dLoqe3zHrBgetwfZ895VV'
+
 
 class WalletTest(BitcoinTestFramework):
     def set_test_params(self):
@@ -60,17 +66,24 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(walletinfo['balance'], 0)
 
         self.sync_all([self.nodes[0:3]])
-        self.nodes[1].generate(101)
+        # Blocknet: keep total PoW height under regtest lastPOWBlock (125);
+        # 52 blocks still mature node 0's coinbase (depth 53) and the first two
+        # of node 1's (depths 52-53), which is all later steps need.
+        self.nodes[1].generate(52)
         self.sync_all([self.nodes[0:3]])
 
         assert_equal(self.nodes[0].getbalance(), 50)
-        assert_equal(self.nodes[1].getbalance(), 50)
+        # Blocknet: regtest coinbase maturity is 50 (not 100), and getbalance
+        # deliberately includes immature balance (see rpcwallet.cpp). Of node 1's
+        # 52 coinbases, 2 are mature (depths 52-53) and 50 immature: total 2600.
+        assert_equal(self.nodes[1].getbalance(), 2600)
         assert_equal(self.nodes[2].getbalance(), 0)
 
         # Check that only first and second nodes have UTXOs
+        # (listunspent shows mature coins only: 1 for node 0, 2 for node 1)
         utxos = self.nodes[0].listunspent()
         assert_equal(len(utxos), 1)
-        assert_equal(len(self.nodes[1].listunspent()), 1)
+        assert_equal(len(self.nodes[1].listunspent()), 2)
         assert_equal(len(self.nodes[2].listunspent()), 0)
 
         self.log.info("test gettxout")
@@ -142,8 +155,10 @@ class WalletTest(BitcoinTestFramework):
         self.nodes[1].sendrawtransaction(tx)
         assert_equal(len(self.nodes[1].listlockunspent()), 0)
 
-        # Have node1 generate 100 blocks (so node0 can recover the fee)
-        self.nodes[1].generate(100)
+        # Have node1 generate blocks to mature node 0's second coinbase
+        # (needs depth >= 51; Blocknet regtest maturity is 50, not 100).
+        # Total PoW height must stay under regtest lastPOWBlock (125).
+        self.nodes[1].generate(51)
         self.sync_all([self.nodes[0:3]])
 
         # node0 should end up with 100 btc in block rewards plus fees, but
@@ -187,14 +202,14 @@ class WalletTest(BitcoinTestFramework):
         fee_per_byte = Decimal('0.001') / 1000
         self.nodes[2].settxfee(fee_per_byte * 1000)
         txid = self.nodes[2].sendtoaddress(address, 10, "", "", False)
-        self.nodes[2].generate(1)
+        self.nodes[2].generatetoaddress(1, EXT_MINING_ADDRESS)
         self.sync_all([self.nodes[0:3]])
         node_2_bal = self.check_fee_amount(self.nodes[2].getbalance(), Decimal('84'), fee_per_byte, self.get_vsize(self.nodes[2].gettransaction(txid)['hex']))
         assert_equal(self.nodes[0].getbalance(), Decimal('10'))
 
         # Send 10 BTC with subtract fee from amount
         txid = self.nodes[2].sendtoaddress(address, 10, "", "", True)
-        self.nodes[2].generate(1)
+        self.nodes[2].generatetoaddress(1, EXT_MINING_ADDRESS)
         self.sync_all([self.nodes[0:3]])
         node_2_bal -= Decimal('10')
         assert_equal(self.nodes[2].getbalance(), node_2_bal)
@@ -202,7 +217,7 @@ class WalletTest(BitcoinTestFramework):
 
         # Sendmany 10 BTC
         txid = self.nodes[2].sendmany('', {address: 10}, 0, "", [])
-        self.nodes[2].generate(1)
+        self.nodes[2].generatetoaddress(1, EXT_MINING_ADDRESS)
         self.sync_all([self.nodes[0:3]])
         node_0_bal += Decimal('10')
         node_2_bal = self.check_fee_amount(self.nodes[2].getbalance(), node_2_bal - Decimal('10'), fee_per_byte, self.get_vsize(self.nodes[2].gettransaction(txid)['hex']))
@@ -210,7 +225,7 @@ class WalletTest(BitcoinTestFramework):
 
         # Sendmany 10 BTC with subtract fee from amount
         txid = self.nodes[2].sendmany('', {address: 10}, 0, "", [address])
-        self.nodes[2].generate(1)
+        self.nodes[2].generatetoaddress(1, EXT_MINING_ADDRESS)
         self.sync_all([self.nodes[0:3]])
         node_2_bal -= Decimal('10')
         assert_equal(self.nodes[2].getbalance(), node_2_bal)
@@ -220,6 +235,12 @@ class WalletTest(BitcoinTestFramework):
         # Create a couple of transactions, then start up a fourth
         # node (nodes[3]) and ask nodes[0] to rebroadcast.
         # EXPECT: nodes[3] should have those transactions in its mempool.
+        # Blocknet: set an explicit fee rate for node 1 like node 2 has above.
+        # Without it, node 1 falls back to fee estimation, which has no data on
+        # a fresh regtest chain and can return an absurd rate that trips
+        # -maxtxfee. (Pre-existing estimator behavior, unrelated to wallet scans.)
+        self.nodes[0].settxfee(fee_per_byte * 1000)
+        self.nodes[1].settxfee(fee_per_byte * 1000)
         txid1 = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 1)
         txid2 = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1)
         sync_mempools(self.nodes[0:2])
@@ -298,7 +319,9 @@ class WalletTest(BitcoinTestFramework):
         connect_nodes_bi(self.nodes, 0, 2)
         sync_blocks(self.nodes[0:3])
 
-        self.nodes[0].generate(1)
+        # Blocknet: mine to an external address so node 0's later send-entire-
+        # balance isn't polluted by an immature coinbase (getbalance counts it).
+        self.nodes[0].generatetoaddress(1, EXT_MINING_ADDRESS)
         sync_blocks(self.nodes[0:3])
         node_2_bal += 2
 
@@ -333,17 +356,21 @@ class WalletTest(BitcoinTestFramework):
         temp_address = self.nodes[1].getnewaddress()
         assert_raises_rpc_error(-5, "Cannot use the p2sh flag with an address - use a script instead", self.nodes[0].importaddress, temp_address, "label", False, True)
 
-        # This will raise an exception for attempting to dump the private key of an address you do not own
-        assert_raises_rpc_error(-3, "Address does not refer to a key", self.nodes[0].dumpprivkey, temp_address)
+        # This will raise an exception for attempting to dump the private key of an address you do not own.
+        # Blocknet: GetKeyForDestination does not check wallet possession, so
+        # this surfaces as -4 "not known" instead of Core's -3 "does not refer
+        # to a key" (see keystore.cpp). Both mean the same thing here.
+        assert_raises_rpc_error(-4, "Private key for address", self.nodes[0].dumpprivkey, temp_address)
 
         # This will raise an exception for attempting to get the private key of an invalid Bitcoin address
-        assert_raises_rpc_error(-5, "Invalid Bitcoin address", self.nodes[0].dumpprivkey, "invalid")
+        # Blocknet rewords Core's "Invalid Bitcoin address" as "Invalid Blocknet address".
+        assert_raises_rpc_error(-5, "Invalid Blocknet address", self.nodes[0].dumpprivkey, "invalid")
 
         # This will raise an exception for attempting to set a label for an invalid Bitcoin address
-        assert_raises_rpc_error(-5, "Invalid Bitcoin address", self.nodes[0].setlabel, "invalid address", "label")
+        assert_raises_rpc_error(-5, "Invalid Blocknet address", self.nodes[0].setlabel, "invalid address", "label")
 
         # This will raise an exception for importing an invalid address
-        assert_raises_rpc_error(-5, "Invalid Bitcoin address or script", self.nodes[0].importaddress, "invalid")
+        assert_raises_rpc_error(-5, "Invalid Blocknet address or script", self.nodes[0].importaddress, "invalid")
 
         # This will raise an exception for attempting to import a pubkey that isn't in hex
         assert_raises_rpc_error(-5, "Pubkey must be a hex string", self.nodes[0].importpubkey, "not hex")
@@ -355,7 +382,9 @@ class WalletTest(BitcoinTestFramework):
         # 1. Send some coins to generate new UTXO
         address_to_import = self.nodes[2].getnewaddress()
         txid = self.nodes[0].sendtoaddress(address_to_import, 1)
-        self.nodes[0].generate(1)
+        # Blocknet: external mining destination (see EXT_MINING_ADDRESS) so the
+        # block reward doesn't pollute node 0's balance for the send-entire test.
+        self.nodes[0].generatetoaddress(1, EXT_MINING_ADDRESS)
         self.sync_all([self.nodes[0:3]])
 
         # 2. Import address from node2 to node1
@@ -440,14 +469,22 @@ class WalletTest(BitcoinTestFramework):
 
         # Get all non-zero utxos together
         chain_addrs = [self.nodes[0].getnewaddress(), self.nodes[0].getnewaddress()]
-        singletxid = self.nodes[0].sendtoaddress(chain_addrs[0], self.nodes[0].getbalance(), "", "", True)
-        self.nodes[0].generate(1)
-        node0_balance = self.nodes[0].getbalance()
+        # Blocknet: getbalance includes immature coinbases (see rpcwallet.cpp),
+        # which are not spendable. Sweep the spendable balance only; the two
+        # immature coinbases from the listsinceblock blocks above stay put.
+        spendable = self.nodes[0].getbalance() - self.nodes[0].getwalletinfo()["immature_balance"]
+        singletxid = self.nodes[0].sendtoaddress(chain_addrs[0], spendable, "", "", True)
+        # Blocknet: external mining destination (see EXT_MINING_ADDRESS) so the
+        # block reward doesn't pollute the wallet balance (getbalance counts
+        # immature coinbases).
+        self.nodes[0].generatetoaddress(1, EXT_MINING_ADDRESS)
+        node0_balance = self.nodes[0].getbalance() - self.nodes[0].getwalletinfo()["immature_balance"]
         # Split into two chains
         rawtx = self.nodes[0].createrawtransaction([{"txid": singletxid, "vout": 0}], {chain_addrs[0]: node0_balance / 2 - Decimal('0.01'), chain_addrs[1]: node0_balance / 2 - Decimal('0.01')})
         signedtx = self.nodes[0].signrawtransactionwithwallet(rawtx)
         singletxid = self.nodes[0].sendrawtransaction(signedtx["hex"])
-        self.nodes[0].generate(1)
+        # Blocknet: external mining destination (see EXT_MINING_ADDRESS).
+        self.nodes[0].generatetoaddress(1, EXT_MINING_ADDRESS)
 
         # Make a long chain of unconfirmed payments without hitting mempool limit
         # Each tx we make leaves only one output of change on a chain 1 longer
@@ -482,16 +519,21 @@ class WalletTest(BitcoinTestFramework):
 
         node0_balance = self.nodes[0].getbalance()
         # With walletrejectlongchains we will not create the tx and store it in our wallet.
-        assert_raises_rpc_error(-4, "Transaction has too long of a mempool chain", self.nodes[0].sendtoaddress, sending_addr, node0_balance - Decimal('0.01'))
+        # Blocknet: subtract immature coinbases (counted by getbalance) so the
+        # funding check passes and the long-chain check is what fires.
+        node0_spendable = node0_balance - self.nodes[0].getwalletinfo()["immature_balance"]
+        assert_raises_rpc_error(-4, "Transaction has too long of a mempool chain", self.nodes[0].sendtoaddress, sending_addr, node0_spendable - Decimal('0.01'))
 
         # Verify nothing new in wallet
         assert_equal(total_txs, len(self.nodes[0].listtransactions("*", 99999)))
 
         # Test getaddressinfo on external address. Note that these addresses are taken from disablewallet.py
         assert_raises_rpc_error(-5, "Invalid address", self.nodes[0].getaddressinfo, "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
-        address_info = self.nodes[0].getaddressinfo("mneYUmWYsuk7kySiURxCi3AGxrAqZxLgPZ")
-        assert_equal(address_info['address'], "mneYUmWYsuk7kySiURxCi3AGxrAqZxLgPZ")
-        assert_equal(address_info["scriptPubKey"], "76a9144e3854046c7bd1594ac904e4793b6a45b36dea0988ac")
+        # Blocknet regtest P2PKH address (replaces Core's mneYUmWYs... which is
+        # invalid under Blocknet's version bytes) with its expected script.
+        address_info = self.nodes[0].getaddressinfo("yJxd9XBcK8mg9dLoqe3zHrBgetwfZ895VV")
+        assert_equal(address_info['address'], "yJxd9XBcK8mg9dLoqe3zHrBgetwfZ895VV")
+        assert_equal(address_info["scriptPubKey"], "76a914f117bc60840e0b4ff2b747f12b1a482d48b247b188ac")
         assert not address_info["ismine"]
         assert not address_info["iswatchonly"]
         assert not address_info["isscript"]

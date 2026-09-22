@@ -11,7 +11,11 @@ from test_framework.util import (
     assert_raises_rpc_error,
 )
 
-RANDOM_COINBASE_ADDRESS = 'mneYUmWYsuk7kySiURxCi3AGxrAqZxLgPZ'
+# Valid-but-unowned Blocknet regtest P2PKH address used as an external mining
+# destination (replaces Bitcoin Core's 'mneYUmWYsuk7kySiURxCi3AGxrAqZxLgPZ',
+# which is invalid under Blocknet's address version bytes). Test nodes never
+# hold its keys, so coinbases sent here stay external to the wallets.
+RANDOM_COINBASE_ADDRESS = 'yJxd9XBcK8mg9dLoqe3zHrBgetwfZ895VV'
 
 def create_transactions(node, address, amt, fees):
     # Create and sign raw transactions from node to address for amt.

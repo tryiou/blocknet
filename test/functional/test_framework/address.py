@@ -9,7 +9,10 @@ from .util import bytes_to_hex_str, hex_str_to_bytes
 
 from . import segwit_addr
 
-ADDRESS_BCRT1_UNSPENDABLE = 'bcrt1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3xueyj'
+# Blocknet ports: regtest uses version bytes 139 (P2PKH) / 19 (P2SH) and
+# bech32 HRP "blockrt" (see chainparams.cpp); mainnet 26 / 28 / "block".
+# (Upstream Core values were 111 / 196 / "bcrt" and 0 / 5 / "bc".)
+ADDRESS_BCRT1_UNSPENDABLE = 'blockrt1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqda0lda'
 
 chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
@@ -33,12 +36,12 @@ def byte_to_base58(b, version):
 
 def keyhash_to_p2pkh(hash, main = False):
     assert (len(hash) == 20)
-    version = 0 if main else 111
+    version = 26 if main else 139
     return byte_to_base58(hash, version)
 
 def scripthash_to_p2sh(hash, main = False):
     assert (len(hash) == 20)
-    version = 5 if main else 196
+    version = 28 if main else 19
     return byte_to_base58(hash, version)
 
 def key_to_p2pkh(key, main = False):
@@ -60,7 +63,7 @@ def program_to_witness(version, program, main = False):
     assert 0 <= version <= 16
     assert 2 <= len(program) <= 40
     assert version > 0 or len(program) in [20, 32]
-    return segwit_addr.encode("bc" if main else "bcrt", version, program)
+    return segwit_addr.encode("block" if main else "blockrt", version, program)
 
 def script_to_p2wsh(script, main = False):
     script = check_script(script)
