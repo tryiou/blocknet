@@ -1729,4 +1729,127 @@ BOOST_AUTO_TEST_CASE(servicenode_tests_rpc)
     pos_ptr.reset();
 }
 
+// addSn collateral dedup must be atomic: a second registration reusing the
+// same collateral replaces the first, leaving exactly one entry. Sequential
+// equivalent of the TOCTOU closed by the single critical section (a true
+// thread race is flaky by construction and out of scope).
+BOOST_FIXTURE_TEST_CASE(servicenode_tests_addsn_collateral_dedup, TestChainPoS)
+{
+    auto & smgr = sn::ServiceNodeMgr::instance();
+    CKey k1, k2;
+    k1.MakeNewKey(true);
+    k2.MakeNewKey(true);
+    // Real chain outpoint as shared collateral (validity skipped below; the
+    // dedup section under test runs regardless of chain validity).
+    const std::vector<COutPoint> collateral{COutPoint(m_coinbase_txns[0]->GetHash(), 0)};
+    const auto tier = sn::ServiceNode::Tier::SPV;
+    uint256 blkhash;
+    memset(blkhash.begin(), 0xcd, 32);
+    sn::ServiceNode sn1, sn2;
+    BOOST_CHECK_NO_THROW(sn1 = snodeNetwork(k1.GetPubKey(), tier, k1.GetPubKey().GetID(),
+                                            collateral, 100, blkhash, {}));
+    BOOST_CHECK_NO_THROW(sn2 = snodeNetwork(k2.GetPubKey(), tier, k2.GetPubKey().GetID(),
+                                            collateral, 100, blkhash, {}));
+    // checkValid=false: the dedup section under test runs regardless of chain validity
+    BOOST_REQUIRE_MESSAGE(smgr.addSn(sn1, false) != nullptr, "first registration must insert");
+    BOOST_REQUIRE_MESSAGE(smgr.addSn(sn2, false) != nullptr, "second registration must insert");
+    BOOST_CHECK_MESSAGE(smgr.getSn(k1.GetPubKey()).isNull(), "same-collateral re-registration must evict the first");
+    BOOST_CHECK_MESSAGE(!smgr.getSn(k2.GetPubKey()).isNull(), "second registration must survive");
+    BOOST_CHECK_EQUAL(smgr.list().size(), 1);
+    cleanupSn();
+}
+
+// seenPackets replay window must trim in halves, not clear: bulk-wiping
+// would drop all replay protection at once and allow a replay burst.
+BOOST_AUTO_TEST_CASE(servicenode_tests_seenpackets_halftrim)
+{
+    auto & smgr = sn::ServiceNodeMgr::instance();
+    smgr.reset();
+    uint256 recent, oldest;
+    for (uint32_t i = 0; i < 350002; ++i) {
+        uint256 h;
+        memset(h.begin(), 0, 32);
+        memcpy(h.begin(), &i, sizeof(i));
+        if (i == 0) oldest = h;
+        if (i == 350001) recent = h;
+        BOOST_REQUIRE_MESSAGE(!smgr.seenPacket(h), "fresh hash must not be a replay");
+    }
+    // Old code cleared the whole set at the threshold (~1 entry left); the
+    // half-trim retains roughly half the window.
+    BOOST_CHECK_MESSAGE(smgr.seenPackets.size() > 175000, "trim must retain half the window");
+    BOOST_CHECK_MESSAGE(smgr.seenPackets.size() <= 350002, "window must stay bounded");
+    BOOST_CHECK_MESSAGE(smgr.seenPacket(recent), "recent hash must still be protected");
+    BOOST_CHECK_MESSAGE(!smgr.seenPacket(oldest), "trimmed hash is re-accepted once");
+    cleanupSn();
+}
+
+// processValidationBlock snapshot/validate/apply: spending a collateral
+// marks the snode invalid; disconnecting (restoring the utxo) revalidates,
+// with isValid running outside the snode mutex throughout.
+BOOST_AUTO_TEST_CASE(servicenode_tests_validationblock_reorg_revalidate)
+{
+    auto pos_ptr = std::make_shared<TestChainPoS>(false);
+    auto & pos = *pos_ptr;
+    auto *params = (CChainParams*)&Params();
+    params->consensus.GetBlockSubsidy = [](const int & blockHeight, const Consensus::Params & consensusParams) {
+        if (blockHeight <= consensusParams.lastPOWBlock)
+            return 1000 * COIN;
+        return 50 * COIN;
+    };
+    pos.Init("1000,50");
+    auto & smgr = sn::ServiceNodeMgr::instance();
+
+    // Snode key owns the collateral (mirrors servicenode_tests_isvalid): the
+    // disconnect revalidation runs the real isValid, which requires the
+    // recovered sig key to match the collateral address.
+    const auto snodePubKey = pos.coinbaseKey.GetPubKey();
+    const auto tier = sn::ServiceNode::Tier::SPV;
+    std::vector<COutPoint> collateral;
+    {
+        std::vector<COutput> coins;
+        LOCK2(cs_main, pos.wallet->cs_wallet);
+        pos.wallet->AvailableCoins(*pos.locked_chain, coins, true, nullptr, 500 * COIN);
+        CAmount totalAmount{0};
+        for (const auto & coin : coins) {
+            totalAmount += coin.GetInputCoin().txout.nValue;
+            collateral.push_back(coin.GetInputCoin().outpoint);
+            if (totalAmount >= sn::ServiceNode::COLLATERAL_SPV)
+                break;
+        }
+    }
+    BOOST_REQUIRE_MESSAGE(!collateral.empty(), "need collateral for registration test");
+    const auto & sighash = sn::ServiceNode::CreateSigHash(snodePubKey, tier, snodePubKey.GetID(),
+                                                          collateral, chainActive.Height(),
+                                                          chainActive.Tip()->GetBlockHash());
+    std::vector<unsigned char> sig;
+    BOOST_REQUIRE(pos.coinbaseKey.SignCompact(sighash, sig));
+    sn::ServiceNode snode;
+    BOOST_CHECK_NO_THROW(snode = snodeNetwork(snodePubKey, tier, snodePubKey.GetID(), collateral,
+                                              chainActive.Height(), chainActive.Tip()->GetBlockHash(), sig));
+    BOOST_REQUIRE_MESSAGE(smgr.addSn(snode, false) != nullptr, "registration must insert");
+
+    // Connect a synthetic block spending the first collateral outpoint.
+    // The spent set is pure memcmp against the block's vins (no chain
+    // access), so this deterministically marks the snode invalid.
+    auto spendBlock = std::make_shared<const CBlock>();
+    CMutableTransaction mtx;
+    mtx.vin.emplace_back(collateral[0]);
+    const_cast<CBlock*>(spendBlock.get())->vtx.push_back(MakeTransactionRef(std::move(mtx)));
+    const int blkHeight = chainActive.Height() + 1;
+    smgr.processValidationBlock(spendBlock, true, blkHeight);
+    BOOST_CHECK_MESSAGE(smgr.getSn(snodePubKey).getInvalid(), "spent collateral must mark invalid");
+    BOOST_CHECK_EQUAL(smgr.getSn(snodePubKey).getInvalidBlockNumber(), blkHeight);
+
+    // Disconnect: every snode is revalidated via isValid outside mu, then
+    // the result applied under mu. The collateral is unspent on the real
+    // chain (the spend above never touched it), so the snode must come back
+    // valid. A lock inversion in this path would hang the test instead.
+    auto emptyBlock = std::make_shared<const CBlock>();
+    smgr.processValidationBlock(emptyBlock, false, blkHeight);
+    BOOST_CHECK_MESSAGE(!smgr.getSn(snodePubKey).getInvalid(), "disconnect must revalidate the snode");
+
+    cleanupSn();
+    pos_ptr.reset();
+}
+
 BOOST_AUTO_TEST_SUITE_END()
