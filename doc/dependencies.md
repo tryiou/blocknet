@@ -10,25 +10,24 @@ Requires a C++17 compiler (GCC >= 9, Clang >= 10).
 | Boost | [1.81.0](https://archives.boost.io/release/1.81.0/source/) | [1.73.0](https://github.com/boostorg/boost) | No |  |  |
 | Clang |  | [10.0+](https://llvm.org/releases/download.html) (C++17 support) |  |  |  |
 | D-Bus | [1.10.18](https://cgit.freedesktop.org/dbus/dbus/tree/NEWS?h=dbus-1.10) |  | No | Yes |  |
-| Expat | [2.4.8](https://libexpat.github.io/) |  | No | Yes |  |
+| Expat | [2.6.4](https://libexpat.github.io/) |  | No | Yes |  |
 | fontconfig | [2.12.6](https://www.freedesktop.org/software/fontconfig/release/) |  | No | Yes |  |
 | FreeType | [2.11.0](https://download.savannah.gnu.org/releases/freetype) |  | No |  |  |
 | GCC |  | [9.1+](https://gcc.gnu.org/) (C++17 support) |  |  |  |
 | HarfBuzz-NG |  |  |  |  |  |
 | libevent | [2.1.12-stable](https://github.com/libevent/libevent/releases) | 2.1.8 | No |  |  |
-| libjpeg |  |  |  |  | [Yes](https://github.com/bitcoin/bitcoin/blob/master/depends/packages/qt.mk#L65) |
-| libpng |  |  |  |  | [Yes](https://github.com/bitcoin/bitcoin/blob/master/depends/packages/qt.mk#L64) |
+| libjpeg |  |  |  |  | [Yes](../depends/packages/qt.mk) |
+| libpng |  |  |  |  | [Yes](../depends/packages/qt.mk) |
 | librsvg | |  |  |  |  |
 | MiniUPnPc | [2.2.2](https://miniupnp.tuxfamily.org/files) |  | No |  |  |
 | OpenSSL | [3.5.8](https://www.openssl.org/source) (LTS to 2030-04) | 3.0 | No |  |  |
-| PCRE |  |  |  |  | [Yes](https://github.com/bitcoin/bitcoin/blob/master/depends/packages/qt.mk#L66) |
-| protobuf | [21.12](https://github.com/protocolbuffers/protobuf/releases/tag/v21.12) |  | No |  |  |
+| PCRE |  |  |  |  | [Yes](../depends/packages/qt.mk) |
 | Python (tests) |  | [3.10](https://www.python.org/downloads) |  |  |  |
 | qrencode | [4.1.1](https://fukuchi.org/works/qrencode) |  | No |  |  |
-| Qt | [5.15.14](https://download.qt.io/archive/qt/5.15/5.15.14/submodules) | [5.11.3](https://github.com/bitcoin/bitcoin/pull/24132) | No |  |  |
-| XCB |  |  |  |  | [Yes](https://github.com/bitcoin/bitcoin/blob/master/depends/packages/qt.mk#L87) (Linux only) |
-| xkbcommon |  |  |  |  | [Yes](https://github.com/bitcoin/bitcoin/blob/master/depends/packages/qt.mk#L86) (Linux only) |
-| ZeroMQ | [4.3.4](https://github.com/zeromq/libzmq/releases) | 4.0.0 | No |  |  |
+| Qt | [5.15.14](https://download.qt.io/archive/qt/5.15/5.15.14/submodules) | 5.11.3 | No |  |  |
+| XCB |  |  |  |  | [Yes](../depends/packages/qt.mk) (Linux only) |
+| xkbcommon |  |  |  |  | [Yes](../depends/packages/qt.mk) (Linux only) |
+| ZeroMQ | [4.3.5](https://github.com/zeromq/libzmq/releases) | 4.0.0 | No |  |  |
 | zlib | [1.3.1](https://github.com/madler/zlib/releases) |  |  |  | No |
 
 Controlling dependencies
@@ -38,7 +37,6 @@ Some dependencies are not needed in all configurations. The following are some f
 #### Options passed to `./configure`
 * MiniUPnPc is not needed with  `--with-miniupnpc=no`.
 * Berkeley DB is not needed with `--disable-wallet`.
-* protobuf is not needed with `--disable-bip70`.
 * Qt is not needed with `--without-gui` (Guix release builds always use `--with-gui=qt5`; missing Qt is a hard error).
 * If the qrencode dependency is absent, QR support won't be added. To force an error when that happens, pass `--with-qrencode`.
 * ZeroMQ is needed only with the `--with-zmq` option.

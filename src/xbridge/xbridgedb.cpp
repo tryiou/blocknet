@@ -13,6 +13,7 @@
 #include <streams.h>
 #include <tinyformat.h>
 #include <util/system.h>
+#include <xbridge/util/xutil.h>
 
 namespace xbridge {
 
@@ -111,6 +112,8 @@ bool XBridgeDB::Write(const XOrderSet & orderSet, bool force) {
         return false;
     if (!force && !ShouldSave()) // prevent saving too soon
         return false;
+    if (!BackupOnce()) // backup failure => refuse to overwrite
+        return false;
     auto saved = SerializeFileDB("orders", pathDB, orderSet);
     if (saved) {
         lastOrdersEmpty = orderSet.empty();
@@ -121,6 +124,20 @@ bool XBridgeDB::Write(const XOrderSet & orderSet, bool force) {
 
 bool XBridgeDB::Read(XOrderSet & orderSet) {
     return DeserializeFileDB(pathDB, orderSet);
+}
+
+bool XBridgeDB::BackupOnce() {
+    const fs::path bak = pathDB.parent_path() / "orders.dat.pre-v2.bak";
+    if (!fs::exists(pathDB) || fs::exists(bak))
+        return true; // fresh install OR already backed up
+    boost::system::error_code ec;
+    fs::copy_file(pathDB, bak, ec);
+    if (ec) {
+        return error("%s: Failed to back up %s -> %s (%s)",
+            __func__, pathDB.string(), bak.string(), ec.message());
+    }
+    LogOrderMsg(bak.string(), "Backed up orders database before first v2 write", __FUNCTION__);
+    return true;
 }
 
 bool XBridgeDB::Exists() {

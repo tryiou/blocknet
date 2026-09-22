@@ -1,5 +1,12 @@
 # PSBT Howto for Bitcoin Core
 
+> Fork note: this howto is inherited verbatim from the Bitcoin Core
+> codebase Blocknet forks (base version **v0.18.0**). "Bitcoin Core"
+> below means that heritage, not the Blocknet release; the wallet
+> binaries are `blocknetd` / `blocknet-cli` / `blocknet-qt` and the
+> data directory is `~/.blocknet/`. PSBT RPC semantics are unchanged
+> from upstream.
+
 Since Bitcoin Core 0.17, an RPC interface exists for Partially Signed Bitcoin
 Transactions (PSBTs, as specified in
 [BIP 174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki)).

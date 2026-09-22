@@ -3875,9 +3875,14 @@ void App::saveOrders(bool force) {
     }
 
     XOrderSet orders;
-    if (!xdb.Read(orders)) {
+    // Fresh installs (!Exists) have nothing to preserve. But when the file
+    // exists and fails to load (foreign version, corruption, torn write),
+    // memory is missing the file's orders: merging + Write would truncate
+    // history, so refuse to overwrite.
+    if (xdb.Exists() && !xdb.Read(orders)) {
         UniValue erro(UniValue::VOBJ);
-        LogOrderMsg(erro, "Failed to load existing orders database", __FUNCTION__);
+        LogOrderMsg(erro, "Failed to load existing orders database, refusing to overwrite", __FUNCTION__);
+        return;
     }
 
     {

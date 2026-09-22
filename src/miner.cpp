@@ -156,7 +156,11 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     // increasing block time (block time must be greater than the previous
     // block's). Instant regtest mining would otherwise build several blocks
     // within the same second and fail TestBlockValidity with "time-too-old".
-    if (IsProofOfStake(nHeight, chainparams.GetConsensus()) && pblock->nTime <= pindexPrev->GetBlockTime())
+    // Regtest-only (MineBlocksOnDemand): on live networks GetAdjustedTime
+    // always advances past the previous block time here, and block
+    // production policy must not be altered outside regtest.
+    if (chainparams.MineBlocksOnDemand() &&
+        IsProofOfStake(nHeight, chainparams.GetConsensus()) && pblock->nTime <= pindexPrev->GetBlockTime())
         pblock->nTime = pindexPrev->GetBlockTime() + 1;
     const int64_t nMedianTimePast = pindexPrev->GetMedianTimePast();
 

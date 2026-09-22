@@ -30,7 +30,7 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: blocknet
           fetch-depth: 0
@@ -106,7 +106,7 @@ jobs:
           cp /tmp/guix-matrix.log release-staging/guix-matrix.log
 
       - name: Upload Guix artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: blocknet-guix-${{ steps.ver.outputs.version }}
           path: release-staging
@@ -124,12 +124,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: blocknet
 
       - name: Download Guix artifacts (into the build context)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: blocknet-guix-${{ needs.guix-build.outputs.version }}
           path: blocknet/blocknet-binaries
@@ -195,7 +195,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: blocknet-guix-${{ needs.guix-build.outputs.version }}
           path: artifacts

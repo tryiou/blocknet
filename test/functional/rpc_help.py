@@ -34,13 +34,15 @@ class HelpRpcTest(BitcoinTestFramework):
         titles = [line[3:-3] for line in node.help().splitlines() if line.startswith('==')]
 
         # Blocknet RPC surface (subset of titles is fine, the test asserts
-        # the exact set present in this build configuration)
+        # the exact set present in this build configuration). Order follows
+        # the daemon's alphabetical category sort (Wallet before XBridge).
         components = ['Blockchain', 'Control', 'Generating', 'Governance', 'Mining',
-                      'Network', 'Rawtransactions', 'Servicenode', 'Util',
-                      'XBridge', 'XRouter']
+                      'Network', 'Rawtransactions', 'Servicenode', 'Util']
 
         if self.is_wallet_compiled():
             components.append('Wallet')
+
+        components += ['XBridge', 'XRouter']
 
         if self.is_zmq_compiled():
             components.append('Zmq')

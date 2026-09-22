@@ -3,16 +3,30 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <test/test_bitcoin.h>
+#include <coinvalidator.h>
+#include <primitives/transaction.h>
 #include <rpc/protocol.h>
+#include <rpc/server.h>
+#include <script/script.h>
+#include <script/standard.h>
 #include <serialize.h>
 #include <streams.h>
+#include <uint256.h>
 #include <util/moneystr.h>
+#include <util/system.h>
+#include <xbridge/currencypair.h>
 #include <xbridge/xbridgeapp.h>
+#include <xbridge/xbridgedb.h>
 #include <xbridge/util/xutil.h>
 #include <boost/test/unit_test.hpp>
 
+#include <fstream>
 #include <iomanip>
 #include <sstream>
+
+// Declared in rpcxbridge.cpp (same extern precedent as xseries.cpp).
+extern CurrencyPair TxOutToCurrencyPair(const std::vector<CTxOut> & vout, std::string& snode_pubkey);
+extern UniValue dxGetOrders(const JSONRPCRequest& request); // declared in rpcxbridge.cpp
 
 BOOST_FIXTURE_TEST_SUITE(xbridge_tests, BasicTestingSetup)
 
@@ -354,6 +368,14 @@ BOOST_AUTO_TEST_CASE(xbridge_redeem_retry_policy) {
     // expire to watch loop; cancel would risk stranding funds.
     BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-26, 0, 2, false) == R::Expire);
     BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_MISC_ERROR, 0, 2, false) == R::Expire);
+    // Malformed send replies (-1) and unset codes (sentinel) must expire in
+    // every watch state: never retry-loop a possibly-broadcast pay tx, and
+    // never cancel on a code nobody assigned.
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-1, 0, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-1, 0, 2, true) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-1, 2, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(xbridge::REDEEM_ERR_UNSET, 0, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(xbridge::REDEEM_ERR_UNSET, 0, 2, true) == R::Expire);
 }
 
 // Exact amount strings for the wallet RPC (replaces double serialization):
@@ -424,23 +446,133 @@ BOOST_AUTO_TEST_CASE(xbridge_wallet_sats_from_real) {
 // Payment output rule (mirrors redeemOrderCounterpartyDeposit): exact
 // on-chain P2SH sats less the integer redeem fee, paying excess only when
 // the deposit strictly covers amount + fee (checkDepositTransaction rule).
+// Drives the live shared helper (xBridgeExcessSats), so builder and
+// verifier cannot drift apart undetected.
 BOOST_AUTO_TEST_CASE(xbridge_payment_sats_rule) {
-    const auto excessRule = [](uint64_t p2sh, CAmount toSats, CAmount fee2sats) {
-        return (p2sh > static_cast<uint64_t>(toSats + fee2sats))
-                   ? static_cast<CAmount>(p2sh) - toSats - fee2sats
-                   : 0;
-    };
     const CAmount toSats{980000}, fee2sats{10000};
     // Exact deposit: no excess, output is the order amount.
-    BOOST_CHECK_EQUAL(excessRule(990000, toSats, fee2sats), CAmount{0});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeExcessSats(990000, toSats, fee2sats), CAmount{0});
     // Overpaid deposit: excess paid to redeemer.
-    BOOST_CHECK_EQUAL(excessRule(995000, toSats, fee2sats), CAmount{5000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeExcessSats(995000, toSats, fee2sats), CAmount{5000});
     // Marginally short deposit (fee tolerance band): output stays the order
     // amount, never reduced by truncation.
-    BOOST_CHECK_EQUAL(excessRule(989999, toSats, fee2sats), CAmount{0});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeExcessSats(989999, toSats, fee2sats), CAmount{0});
     // Refund rule: order amount converts exactly, input is amount + fee.
     BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800}, 100000000), toSats);
     BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800 + 100}, 100000000), CAmount{990000});
+}
+
+// On-chain order records with negative amounts must be rejected before the
+// uint64_t cast in TxOutToCurrencyPair (a negative would wrap to a huge
+// amount). Driven through a real OP_RETURN output like a scanned chain tx.
+BOOST_AUTO_TEST_CASE(xbridge_txout_negative_amount_rejected) {
+    const auto makeOut = [](const int64_t fromAmt, const int64_t toAmt) {
+        UniValue info(UniValue::VARR);
+        info.push_back("91d0ea83edc79b9a2041c51d08037cff87c181efb311a095dfdd4edbcc7993a9");
+        info.push_back("BLOCK");
+        info.push_back(fromAmt);
+        info.push_back("LTC");
+        info.push_back(toAmt);
+        const std::string str = info.write();
+        CScript script = CScript() << OP_RETURN
+                                   << std::vector<unsigned char>(str.begin(), str.end());
+        return CTxOut(0, script);
+    };
+    std::string snode;
+    const CurrencyPair badFrom = TxOutToCurrencyPair({makeOut(-5, 5000000)}, snode);
+    BOOST_CHECK(badFrom.tag == CurrencyPair::Tag::Error);
+    BOOST_CHECK_EQUAL(badFrom.error(), "Bad from amount");
+    const CurrencyPair badTo = TxOutToCurrencyPair({makeOut(11220000, -7)}, snode);
+    BOOST_CHECK(badTo.tag == CurrencyPair::Tag::Error);
+    BOOST_CHECK_EQUAL(badTo.error(), "Bad to amount");
+    const CurrencyPair good = TxOutToCurrencyPair({makeOut(11220000, 5000000)}, snode);
+    BOOST_CHECK(good.tag == CurrencyPair::Tag::Valid);
+}
+
+// Fail-open tripwire for the coinvalidator infraction list: LoadStatic skips
+// unparsable lines instead of aborting, so a blacklist typo would silently
+// whitelist an exploited txid. These known-bad txids (getExplList head) must
+// stay invalid; any skipped or typo'd line flips this test red.
+BOOST_AUTO_TEST_CASE(coinvalidator_static_list_failopen_guard) {
+    BOOST_REQUIRE(CoinValidator::instance().LoadStatic());
+    BOOST_CHECK_MESSAGE(!CoinValidator::instance().IsCoinValid(
+        "00c0a0a887c2663e563494bd87f0ce279698d3e4f60fa3c5c39893f7fce8c336"),
+        "blacklisted exploit txid must stay invalid");
+    BOOST_CHECK_MESSAGE(!CoinValidator::instance().IsCoinValid(
+        "00c2408da7c5d0bbbbc4aeeeae43f25d97fb6ba9c00a0203091af33a2c5276d7"),
+        "blacklisted exploit txid must stay invalid");
+    BOOST_CHECK_MESSAGE(CoinValidator::instance().IsCoinValid(
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+        "clean txid must stay valid");
+}
+
+// dxGetOrders reply-shape pin (UniValue migration): field names, string
+// amount encoding, and status values are downstream-visible (Block DX).
+BOOST_AUTO_TEST_CASE(xbridge_dxgetorders_reply_shape) {
+    // Isolate from orders left by other cases (no erase API exists; history
+    // is invisible to dxGetOrders which lists open transactions only).
+    xbridge::App::instance().moveTransactionToHistory(uint256S(std::string(64, '4')));
+    gArgs.SoftSetBoolArg("-dxnowallets", true); // list without live connectors
+    const auto mkOrder = [](const std::string & idhex, const CAmount fromAmt,
+                            const CAmount toAmt, const CAmount minAmt) {
+        auto tr = std::make_shared<xbridge::TransactionDescr>();
+        tr->id = uint256S(idhex);
+        tr->fromCurrency = "BLOCK";
+        tr->toCurrency = "LTC";
+        tr->from = std::vector<unsigned char>{'f'};
+        tr->to = std::vector<unsigned char>{'t'};
+        tr->fromAmount = fromAmt;
+        tr->toAmount = toAmt;
+        tr->minFromAmount = minAmt;
+        tr->origFromAmount = fromAmt;
+        tr->origToAmount = toAmt;
+        return tr;
+    };
+    auto t1 = mkOrder(std::string(64, '5'), CAmount{11220000}, CAmount{5000000}, CAmount{100});
+    auto t2 = mkOrder(std::string(64, '6'), CAmount{9800}, CAmount{4900}, CAmount{0});
+    xbridge::App::instance().appendTransaction(t1);
+    xbridge::App::instance().appendTransaction(t2);
+    JSONRPCRequest req;
+    const UniValue result = dxGetOrders(req);
+    BOOST_REQUIRE_MESSAGE(result.isArray(), "dxGetOrders must return an array");
+    BOOST_REQUIRE_MESSAGE(result.size() >= 2, "both test orders must be listed");
+    bool found1{false}, found2{false};
+    for (const auto & row : result.getValues()) {
+        BOOST_REQUIRE(row.isObject());
+        const std::string id = find_value(row.get_obj(), "id").get_str();
+        if (id != t1->id.GetHex() && id != t2->id.GetHex())
+            continue;
+        const auto & tr = (id == t1->id.GetHex()) ? t1 : t2;
+        if (id == t1->id.GetHex()) found1 = true; else found2 = true;
+        // amounts are decimal strings, never JSON numbers (wallet-parseable)
+        BOOST_CHECK_EQUAL(find_value(row.get_obj(), "maker").get_str(), "BLOCK");
+        BOOST_CHECK_EQUAL(find_value(row.get_obj(), "taker").get_str(), "LTC");
+        BOOST_CHECK_EQUAL(find_value(row.get_obj(), "maker_size").get_str(),
+                          xbridge::xBridgeStringValueFromAmount(tr->fromAmount));
+        BOOST_CHECK_EQUAL(find_value(row.get_obj(), "taker_size").get_str(),
+                          xbridge::xBridgeStringValueFromAmount(tr->toAmount));
+        BOOST_CHECK(!find_value(row.get_obj(), "maker_size").isNum());
+        BOOST_CHECK_EQUAL(find_value(row.get_obj(), "order_type").get_str(), "exact");
+        BOOST_CHECK(find_value(row.get_obj(), "partial_repost").isBool());
+        BOOST_CHECK(find_value(row.get_obj(), "partial_parent_id").isStr());
+        BOOST_CHECK_EQUAL(find_value(row.get_obj(), "status").get_str(), tr->strState());
+        BOOST_CHECK(!find_value(row.get_obj(), "updated_at").get_str().empty());
+    }
+    BOOST_CHECK_MESSAGE(found1 && found2, "both test rows must be found by id");
+    xbridge::App::instance().moveTransactionToHistory(t1->id);
+    xbridge::App::instance().moveTransactionToHistory(t2->id);
+    gArgs.ForceSetArg("-dxnowallets", "false"); // restore: SoftSet has no unset
+}
+
+// makeError shape pin (UniValue migration): code is a JSON number (the
+// int cast), name carries the calling function, error text non-empty.
+BOOST_AUTO_TEST_CASE(xbridge_makeerror_shape) {
+    const UniValue e = xbridge::makeError(xbridge::INVALID_PARAMETERS, "dxGetOrders", "msg");
+    BOOST_REQUIRE(e.isObject());
+    BOOST_CHECK(find_value(e.get_obj(), "code").isNum());
+    BOOST_CHECK_EQUAL(find_value(e.get_obj(), "code").get_int(), 1025);
+    BOOST_CHECK_EQUAL(find_value(e.get_obj(), "name").get_str(), "dxGetOrders");
+    BOOST_CHECK(!find_value(e.get_obj(), "error").get_str().empty());
 }
 
 // XTxIn carries integer wallet sats (no double -> no truncation in
@@ -448,6 +580,120 @@ BOOST_AUTO_TEST_CASE(xbridge_payment_sats_rule) {
 BOOST_AUTO_TEST_CASE(xbridge_xtxin_carries_sats) {
     xbridge::XTxIn in("aaabbb", 1, CAmount{980000});
     BOOST_CHECK_EQUAL(in.amountSats, CAmount{980000});
+}
+
+static std::vector<unsigned char> readFileBytes(const fs::path & p) {
+    std::ifstream f(p.string(), std::ios::binary);
+    return std::vector<unsigned char>(std::istreambuf_iterator<char>(f),
+                                      std::istreambuf_iterator<char>());
+}
+
+// Note on file-backed tests below: SetDataDir alone is not enough.
+// GetDataDir caches its result, and earlier suites in a full-binary run
+// leave a stale cache pointing at removed temp roots, so the cache must be
+// cleared too (ClearDatadirCache after every SetDataDir).
+
+// orders.dat durability: the first overwrite of a pre-existing file leaves a
+// byte-identical one-time backup that later writes never touch.
+BOOST_AUTO_TEST_CASE(xbridge_orders_backup_once) {
+    SetDataDir("orders_backup_once");
+    ClearDatadirCache();
+    // Hermetic: datadirs persist across test-binary runs; stale files from a
+    // previous run would fake the first-write precondition.
+    fs::remove(GetDataDir() / "orders.dat");
+    fs::remove(GetDataDir() / "orders.dat.pre-v2.bak");
+    xbridge::XBridgeDB db;
+    xbridge::XOrderSet orders;
+    xbridge::TransactionDescr d;
+    d.id = uint256S(std::string(64, '1'));
+    d.fromAmount = 9800;
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    const fs::path dbfile = GetDataDir() / "orders.dat";
+    const fs::path bak = GetDataDir() / "orders.dat.pre-v2.bak";
+    BOOST_CHECK_MESSAGE(!fs::exists(bak), "no backup on first write of a fresh file");
+    const auto before = readFileBytes(dbfile);
+    BOOST_REQUIRE(!before.empty());
+    d.fromAmount = 11220000;
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    BOOST_REQUIRE_MESSAGE(fs::exists(bak), "backup created before the second write");
+    BOOST_CHECK_MESSAGE(readFileBytes(bak) == before, "backup is the pre-write content");
+    xbridge::XOrderSet back;
+    BOOST_REQUIRE(db.Read(back));
+    BOOST_CHECK_EQUAL(back[d.id].fromAmount, uint64_t{11220000});
+    d.fromAmount = 5000000;
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    BOOST_CHECK_MESSAGE(readFileBytes(bak) == before, "later writes never touch the backup");
+}
+
+// orders.dat durability: a file that exists but fails to load (foreign
+// version, corruption, torn write) must make the real App::saveOrders path
+// refuse the overwrite, leaving file bytes untouched and memory authoritative.
+BOOST_AUTO_TEST_CASE(xbridge_orders_no_overwrite_on_failed_read) {
+    SetDataDir("orders_no_overwrite");
+    ClearDatadirCache();
+    fs::remove(GetDataDir() / "orders.dat");
+    fs::remove(GetDataDir() / "orders.dat.pre-v2.bak");
+    // seed a healthy file so the guard has something to protect
+    {
+        xbridge::XBridgeDB seed;
+        xbridge::XOrderSet seedOrders;
+        xbridge::TransactionDescr s;
+        s.id = uint256S(std::string(64, '3'));
+        s.fromAmount = 9800;
+        seedOrders[s.id] = s;
+        BOOST_REQUIRE(seed.Write(seedOrders, true));
+    }
+    // corrupt the file in place
+    {
+        std::ofstream f((GetDataDir() / "orders.dat").string(),
+                        std::ios::binary | std::ios::trunc);
+        f << "not a valid orders database, corrupt bytes";
+    }
+    const auto before = readFileBytes(GetDataDir() / "orders.dat");
+    BOOST_REQUIRE(!before.empty());
+    // non-empty memory: a local order forces saveOrders past the empty check
+    // into the guarded Read path
+    auto tr = std::make_shared<xbridge::TransactionDescr>();
+    tr->id = uint256S(std::string(64, '4'));
+    tr->from = std::vector<unsigned char>{'f'};
+    tr->to = std::vector<unsigned char>{'t'};
+    tr->fromAmount = 11220000;
+    BOOST_REQUIRE(tr->isLocal());
+    xbridge::App::instance().appendTransaction(tr);
+    // drive the real guarded path with force: must refuse before Write (no
+    // .bak side effect either — backup lives inside Write)
+    xbridge::App::instance().saveOrders(true);
+    BOOST_CHECK_MESSAGE(readFileBytes(GetDataDir() / "orders.dat") == before,
+                        "refused save must leave the corrupt file untouched");
+    BOOST_CHECK_MESSAGE(!fs::exists(GetDataDir() / "orders.dat.pre-v2.bak"),
+                        "refused save must not reach Write (no backup taken)");
+    BOOST_CHECK_MESSAGE(xbridge::App::instance().transaction(tr->id) != nullptr,
+                        "refusal must not drop the in-memory order");
+}
+
+// orders.dat v2 round-trip through the real file path (envelope + checksum):
+// the persisted retry budget survives Write -> Read with fields intact.
+BOOST_AUTO_TEST_CASE(xbridge_orders_v2_roundtrip) {
+    SetDataDir("orders_v2_roundtrip");
+    ClearDatadirCache();
+    fs::remove(GetDataDir() / "orders.dat");
+    fs::remove(GetDataDir() / "orders.dat.pre-v2.bak");
+    xbridge::XBridgeDB db;
+    xbridge::XOrderSet orders;
+    xbridge::TransactionDescr d;
+    d.id = uint256S(std::string(64, '2'));
+    d.fromAmount = 9800;
+    d.tryRedeem();
+    d.tryRedeem();
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    xbridge::XOrderSet back;
+    BOOST_REQUIRE(db.Read(back));
+    BOOST_CHECK_EQUAL(back[d.id].fromAmount, uint64_t{9800});
+    BOOST_CHECK_EQUAL(back[d.id].redeemTries(), 2u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

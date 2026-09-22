@@ -135,11 +135,11 @@ public:
 
     virtual bool checkDepositTransaction(const std::string & depositTxId,
                                          const std::string & /*destination*/,
-                                         double & amount,
+                                         const CAmount amountSats,
                                          uint64_t & p2shAmount,
                                          uint32_t & depositTxVout,
                                          const std::string & expectedScript,
-                                         double & excessAmount,
+                                         CAmount & excessSats,
                                          bool & isGood) = 0;
 
     virtual bool getSecretFromPaymentTransaction(const std::string & paymentTxId,

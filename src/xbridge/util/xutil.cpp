@@ -318,6 +318,17 @@ CAmount xBridgeDescrToSats(CAmount descrAmount, uint64_t walletCoin) {
     return descrAmount * static_cast<CAmount>(walletCoin) / xbridge::TransactionDescr::COIN;
 }
 
+CAmount xBridgeExcessSats(const uint64_t p2shSats, const CAmount toSats, const CAmount fee2Sats) {
+    // Single definition of the redeem excess rule, shared by the payment
+    // builder (redeemOrderCounterpartyDeposit) and the deposit verifier
+    // (checkDepositTransaction): pay the excess only when the deposit
+    // strictly covers amount + redeem fee, in integer sats. Kept in one
+    // place so the two sides cannot drift apart again.
+    return (p2shSats > static_cast<uint64_t>(toSats + fee2Sats))
+               ? static_cast<CAmount>(p2shSats) - toSats - fee2Sats
+               : 0;
+}
+
 CAmount xBridgeWalletSatsFromReal(double coinAmount, uint64_t walletCoin) {
     // Nearest-sat rounding (not truncation): wallet RPC doubles carry at
     // most 8 decimals, so llround recovers the exact integer for all

@@ -2458,7 +2458,9 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
         return true;
     }
 
-    double checkAmount = static_cast<double>(xtx->toAmount) / TransactionDescr::COIN;
+    // Expected deposit in integer wallet sats (converted once from descr
+    // units; no double division on this path anymore).
+    const CAmount checkSats = xBridgeDescrToSats(xtx->toAmount, connTo->COIN);
 
     // check preliminary lock times for counterparty
     {
@@ -2493,13 +2495,17 @@ bool Session::Impl::processTransactionCreateB(XBridgePacketPtr packet) const
     {
         uint64_t p2shAmount{0};
         bool isGood = false;
-        if (!connTo->checkDepositTransaction(binATxId, std::string(), checkAmount, p2shAmount, counterPartyVoutN, counterPartyScriptHex, xtx->oOverpayment, isGood))
+        // oOverpayment is a legacy persisted double: keep its (unread)
+        // semantics by converting the integer excess back at the boundary.
+        CAmount excessSats{0};
+        if (!connTo->checkDepositTransaction(binATxId, std::string(), checkSats, p2shAmount, counterPartyVoutN, counterPartyScriptHex, excessSats, isGood))
         {
             // move packet to pending
             xapp.processLater(txid, packet);
             return true;
         }
-        else if (!isGood)
+        xtx->oOverpayment = static_cast<double>(excessSats) / static_cast<double>(connTo->COIN);
+        if (!isGood)
         {
             UniValue log_obj(UniValue::VOBJ);
             log_obj.pushKV("orderid", txid.GetHex());
@@ -2933,8 +2939,9 @@ bool Session::Impl::processTransactionConfirmA(XBridgePacketPtr packet) const
         return true;
     }
 
-    double outAmount   = static_cast<double>(xtx->toAmount)/TransactionDescr::COIN;
-    double checkAmount = outAmount;
+    // Expected deposit in integer wallet sats (converted once from descr
+    // units; no double division on this path anymore).
+    const CAmount checkSats = xBridgeDescrToSats(xtx->toAmount, connTo->COIN);
 
     // check preliminary lock times for counterparty
     {
@@ -2969,13 +2976,17 @@ bool Session::Impl::processTransactionConfirmA(XBridgePacketPtr packet) const
     {
         uint64_t p2shAmount{0};
         bool isGood = false;
-        if (!connTo->checkDepositTransaction(binTxId, std::string(), checkAmount, p2shAmount, counterPartyVoutN, counterPartyScriptHex, xtx->oOverpayment, isGood))
+        // oOverpayment is a legacy persisted double: keep its (unread)
+        // semantics by converting the integer excess back at the boundary.
+        CAmount excessSats{0};
+        if (!connTo->checkDepositTransaction(binTxId, std::string(), checkSats, p2shAmount, counterPartyVoutN, counterPartyScriptHex, excessSats, isGood))
         {
             // move packet to pending
             xapp.processLater(txid, packet);
             return true;
         }
-        else if (!isGood)
+        xtx->oOverpayment = static_cast<double>(excessSats) / static_cast<double>(connTo->COIN);
+        if (!isGood)
         {
             UniValue log_obj(UniValue::VOBJ);
             log_obj.pushKV("orderid", txid.GetHex());
@@ -3009,7 +3020,9 @@ bool Session::Impl::processTransactionConfirmA(XBridgePacketPtr packet) const
         // broadcast state expire to the watch loop (cancel unsafe there).
         // Re-drive is idempotent (deposit re-check passes, ALREADY_IN_CHAIN
         // counts as success, terminal states ignore the packet).
-        int32_t errCode = 0;
+        // Initialized to the unset sentinel, never 0: only the deliberate
+        // bad-secret assignment may classify as CancelOrder.
+        int32_t errCode = xbridge::REDEEM_ERR_UNSET;
         if (!redeemOrderCounterpartyDeposit(xtx, errCode)) {
             switch (xBridgeRedeemRetryClass(errCode, xtx->redeemTries(), xtx->maxRedeemTries(), xtx->isDoneWatching())) {
             case xbridge::RedeemRetryClass::Retry: {
@@ -3238,7 +3251,9 @@ bool Session::Impl::processTransactionConfirmB(XBridgePacketPtr packet) const
         // standard abort path, uncertain send failures expire to the watch
         // loop. Previously this site retried unconditionally on every failure
         // class with no budget.
-        int32_t errCode = 0;
+        // Initialized to the unset sentinel, never 0: only the deliberate
+        // bad-secret assignment may classify as CancelOrder.
+        int32_t errCode = xbridge::REDEEM_ERR_UNSET;
         if (!redeemOrderCounterpartyDeposit(xtx, errCode)) {
             switch (xBridgeRedeemRetryClass(errCode, xtx->redeemTries(), xtx->maxRedeemTries(), xtx->isDoneWatching())) {
             case xbridge::RedeemRetryClass::Retry: {
@@ -4064,17 +4079,13 @@ bool Session::Impl::redeemOrderCounterpartyDeposit(const TransactionDescrPtr & x
     auto toAddr = connTo->fromXAddr(xtx->to);
 
     // Exact integer payment: counterparty P2SH amount is already exact
-    // on-chain sats (oBinTxP2SHAmount); the redeem output mirrors the
-    // checkDepositTransaction excess rule (pay the excess only when the
-    // deposit strictly covers amount + redeem fee), computed in integers.
+    // on-chain sats (oBinTxP2SHAmount). The excess rule is shared with the
+    // deposit verifier (xBridgeExcessSats) so both sides agree bit-for-bit.
     // oOverpayment (legacy double) is not used for construction.
     const CAmount toSats = xBridgeDescrToSats(xtx->toAmount, connTo->COIN);
     const CAmount fee2sats = xBridgeWalletSatsFromReal(connTo->minTxFee2(1, 1), connTo->COIN);
     const uint64_t p2shSats = xtx->oBinTxP2SHAmount;
-    const CAmount excessSats =
-        (p2shSats > static_cast<uint64_t>(toSats + fee2sats))
-            ? static_cast<CAmount>(p2shSats) - toSats - fee2sats
-            : 0;
+    const CAmount excessSats = xbridge::xBridgeExcessSats(p2shSats, toSats, fee2sats);
     std::vector<xbridge::XTxIn>                   inputs;
     std::vector<std::pair<std::string, CAmount> > outputs;
 
