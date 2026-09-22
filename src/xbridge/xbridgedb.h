@@ -29,6 +29,10 @@ public:
     bool Create();
     bool ShouldSave();
 private:
+    // Best-effort one-time backup orders.dat -> orders.dat.pre-v2.bak before
+    // the first overwrite. Version-agnostic (no format peek): runs at most
+    // once per datadir, so the pre-upgrade copy is never overwritten.
+    bool BackupOnce();
     const fs::path pathDB;
     boost::posix_time::ptime lastsave;
     bool lastOrdersEmpty{false};

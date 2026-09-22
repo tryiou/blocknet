@@ -6,11 +6,14 @@
 #include <rpc/protocol.h>
 #include <serialize.h>
 #include <streams.h>
+#include <uint256.h>
 #include <util/moneystr.h>
 #include <xbridge/xbridgeapp.h>
+#include <xbridge/xbridgedb.h>
 #include <xbridge/util/xutil.h>
 #include <boost/test/unit_test.hpp>
 
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 
@@ -448,6 +451,112 @@ BOOST_AUTO_TEST_CASE(xbridge_payment_sats_rule) {
 BOOST_AUTO_TEST_CASE(xbridge_xtxin_carries_sats) {
     xbridge::XTxIn in("aaabbb", 1, CAmount{980000});
     BOOST_CHECK_EQUAL(in.amountSats, CAmount{980000});
+}
+
+static std::vector<unsigned char> readFileBytes(const fs::path & p) {
+    std::ifstream f(p.string(), std::ios::binary);
+    return std::vector<unsigned char>(std::istreambuf_iterator<char>(f),
+                                      std::istreambuf_iterator<char>());
+}
+
+// orders.dat durability: the first overwrite of a pre-existing file leaves a
+// byte-identical one-time backup that later writes never touch.
+BOOST_AUTO_TEST_CASE(xbridge_orders_backup_once) {
+    SetDataDir("orders_backup_once");
+    // Hermetic: datadirs persist across test-binary runs; stale files from a
+    // previous run would fake the first-write precondition.
+    fs::remove(GetDataDir() / "orders.dat");
+    fs::remove(GetDataDir() / "orders.dat.pre-v2.bak");
+    xbridge::XBridgeDB db;
+    xbridge::XOrderSet orders;
+    xbridge::TransactionDescr d;
+    d.id = uint256S(std::string(64, '1'));
+    d.fromAmount = 9800;
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    const fs::path dbfile = GetDataDir() / "orders.dat";
+    const fs::path bak = GetDataDir() / "orders.dat.pre-v2.bak";
+    BOOST_CHECK_MESSAGE(!fs::exists(bak), "no backup on first write of a fresh file");
+    const auto before = readFileBytes(dbfile);
+    BOOST_REQUIRE(!before.empty());
+    d.fromAmount = 11220000;
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    BOOST_REQUIRE_MESSAGE(fs::exists(bak), "backup created before the second write");
+    BOOST_CHECK_MESSAGE(readFileBytes(bak) == before, "backup is the pre-write content");
+    xbridge::XOrderSet back;
+    BOOST_REQUIRE(db.Read(back));
+    BOOST_CHECK_EQUAL(back[d.id].fromAmount, uint64_t{11220000});
+    d.fromAmount = 5000000;
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    BOOST_CHECK_MESSAGE(readFileBytes(bak) == before, "later writes never touch the backup");
+}
+
+// orders.dat durability: a file that exists but fails to load (foreign
+// version, corruption, torn write) must make the real App::saveOrders path
+// refuse the overwrite, leaving file bytes untouched and memory authoritative.
+BOOST_AUTO_TEST_CASE(xbridge_orders_no_overwrite_on_failed_read) {
+    SetDataDir("orders_no_overwrite");
+    fs::remove(GetDataDir() / "orders.dat");
+    fs::remove(GetDataDir() / "orders.dat.pre-v2.bak");
+    // seed a healthy file so the guard has something to protect
+    {
+        xbridge::XBridgeDB seed;
+        xbridge::XOrderSet seedOrders;
+        xbridge::TransactionDescr s;
+        s.id = uint256S(std::string(64, '3'));
+        s.fromAmount = 9800;
+        seedOrders[s.id] = s;
+        BOOST_REQUIRE(seed.Write(seedOrders, true));
+    }
+    // corrupt the file in place
+    {
+        std::ofstream f((GetDataDir() / "orders.dat").string(),
+                        std::ios::binary | std::ios::trunc);
+        f << "not a valid orders database, corrupt bytes";
+    }
+    const auto before = readFileBytes(GetDataDir() / "orders.dat");
+    BOOST_REQUIRE(!before.empty());
+    // non-empty memory: a local order forces saveOrders past the empty check
+    // into the guarded Read path
+    auto tr = std::make_shared<xbridge::TransactionDescr>();
+    tr->id = uint256S(std::string(64, '4'));
+    tr->from = std::vector<unsigned char>{'f'};
+    tr->to = std::vector<unsigned char>{'t'};
+    tr->fromAmount = 11220000;
+    BOOST_REQUIRE(tr->isLocal());
+    xbridge::App::instance().appendTransaction(tr);
+    // drive the real guarded path with force: must refuse before Write (no
+    // .bak side effect either — backup lives inside Write)
+    xbridge::App::instance().saveOrders(true);
+    BOOST_CHECK_MESSAGE(readFileBytes(GetDataDir() / "orders.dat") == before,
+                        "refused save must leave the corrupt file untouched");
+    BOOST_CHECK_MESSAGE(!fs::exists(GetDataDir() / "orders.dat.pre-v2.bak"),
+                        "refused save must not reach Write (no backup taken)");
+    BOOST_CHECK_MESSAGE(xbridge::App::instance().transaction(tr->id) != nullptr,
+                        "refusal must not drop the in-memory order");
+}
+
+// orders.dat v2 round-trip through the real file path (envelope + checksum):
+// the persisted retry budget survives Write -> Read with fields intact.
+BOOST_AUTO_TEST_CASE(xbridge_orders_v2_roundtrip) {
+    SetDataDir("orders_v2_roundtrip");
+    fs::remove(GetDataDir() / "orders.dat");
+    fs::remove(GetDataDir() / "orders.dat.pre-v2.bak");
+    xbridge::XBridgeDB db;
+    xbridge::XOrderSet orders;
+    xbridge::TransactionDescr d;
+    d.id = uint256S(std::string(64, '2'));
+    d.fromAmount = 9800;
+    d.tryRedeem();
+    d.tryRedeem();
+    orders[d.id] = d;
+    BOOST_REQUIRE(db.Write(orders, true));
+    xbridge::XOrderSet back;
+    BOOST_REQUIRE(db.Read(back));
+    BOOST_CHECK_EQUAL(back[d.id].fromAmount, uint64_t{9800});
+    BOOST_CHECK_EQUAL(back[d.id].redeemTries(), 2u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
