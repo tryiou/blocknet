@@ -120,19 +120,26 @@ CurrencyPair TxOutToCurrencyPair(const std::vector<CTxOut> & vout, std::string& 
         return {"Bad ID" }; }
     try { xtx[1].get_str(); } catch(...) {
         return {"Bad from token" }; }
-    try { xtx[2].get_int64(); } catch(...) {
+    // Amounts arrive as JSON numbers and convert to uint64_t: reject
+    // negatives before the cast (a negative would wrap to a huge amount).
+    int64_t fromAmount{0}, toAmount{0};
+    try { fromAmount = xtx[2].get_int64(); } catch(...) {
+        return {"Bad from amount" }; }
+    if (fromAmount < 0) {
         return {"Bad from amount" }; }
     try { xtx[3].get_str(); } catch(...) {
         return {"Bad to token" }; }
-    try { xtx[4].get_int64(); } catch(...) {
+    try { toAmount = xtx[4].get_int64(); } catch(...) {
+        return {"Bad to amount" }; }
+    if (toAmount < 0) {
         return {"Bad to amount" }; }
 
     return CurrencyPair{
             xtx[0].get_str(),    // xid
             {ccy::Currency{xtx[1].get_str(),xbridge::TransactionDescr::COIN}, // fromCurrency
-             static_cast<ccy::Amount>(xtx[2].get_int64())},           // fromAmount
+             static_cast<ccy::Amount>(fromAmount)},                   // fromAmount
             {ccy::Currency{xtx[3].get_str(),xbridge::TransactionDescr::COIN}, // toCurrency
-             static_cast<ccy::Amount>(xtx[4].get_int64())}            // toAmount
+             static_cast<ccy::Amount>(toAmount)}                      // toAmount
     };
 }
 

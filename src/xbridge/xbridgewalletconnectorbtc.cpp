@@ -1994,15 +1994,15 @@ double BtcWalletConnector<CryptoProvider>::minTxFee2(const uint32_t inputCount, 
 template <class CryptoProvider>
 bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::string & depositTxId,
                                                                  const std::string & /*destination*/,
-                                                                 double & amount,
+                                                                 const CAmount amountSats,
                                                                  uint64_t & p2shAmount,
                                                                  uint32_t & depositTxVout,
                                                                  const std::string & expectedScript,
-                                                                 double & excessAmount,
+                                                                 CAmount & excessSats,
                                                                  bool & isGood)
 {
     isGood  = false;
-    excessAmount = 0;
+    excessSats = 0;
 
     std::string tx;
     if (!rpc::getRawTransaction(m_user, m_passwd, m_ip, m_port, depositTxId, false, tx))
@@ -2076,8 +2076,10 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
     }
     const UniValue & vouts = voutso.get_array();
 
-    // Add up all vin amounts (prevouts)
-    double totalVinAmount{0};
+    // Add up all vin amounts (prevouts) in integer base units. Wallet RPC
+    // doubles carry at most 8 decimals, so nearest-sat conversion is exact
+    // for all realistic magnitudes.
+    CAmount totalVinAmount{0};
     for (const auto & vin : vins.getValues()) {
         const UniValue & txidObj = find_value(vin.get_obj(), "txid");
         if (!txidObj.isStr()) {
@@ -2121,14 +2123,14 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
             return true; // done
         }
         bool foundVout{false};
-        double vinAmount{0};
+        CAmount vinAmount{0};
         for (const auto & vout : vinOuts.getValues()) {
             const UniValue & valObj = find_value(vout.get_obj(), "value");
             const UniValue & nObj = find_value(vout.get_obj(), "n");
             if (!valObj.isNum() || !nObj.isNum())
                 continue;
             if (nObj.get_int() == vinTxVout) {
-                vinAmount = valObj.get_real();
+                vinAmount = xbridge::xBridgeWalletSatsFromReal(valObj.get_real(), COIN);
                 foundVout = true;
                 break;
             }
@@ -2140,9 +2142,9 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
         totalVinAmount += vinAmount;
     }
 
-    // Add up all vout amounts
-    double totalVoutAmount{0};
-    double depositP2SHAmount{0};
+    // Add up all vout amounts in integer base units
+    CAmount totalVoutAmount{0};
+    CAmount depositP2SHAmount{0};
     for (const auto & vout : vouts.getValues()) {
         const UniValue & amountObj = find_value(vout.get_obj(), "value");
         if (!amountObj.isNum()) {
@@ -2158,7 +2160,8 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
             LOG() << "tx " << depositTxId << " bad vout, has negative amount " << __FUNCTION__;
             return true; // done
         }
-        totalVoutAmount += amountObj.get_real();
+        const CAmount voutSats = xbridge::xBridgeWalletSatsFromReal(amountObj.get_real(), COIN);
+        totalVoutAmount += voutSats;
 
         // Check all vouts for valid deposit
         const UniValue & scriptPubKey = find_value(vout.get_obj(), "scriptPubKey");
@@ -2168,10 +2171,10 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
 
         // Check that expected script and amounts match
         if (expectedScript == hex.get_str()) {
-            const UniValue & vamount = find_value(vout.get_obj(), "value");
             const UniValue & n = find_value(vout.get_obj(), "n");
-            if (amount <= vamount.get_real() + std::numeric_limits<double>::epsilon()) {
-                depositP2SHAmount = vamount.get_real();
+            // Exact integer match: both sides are whole base units, no epsilon.
+            if (amountSats <= voutSats) {
+                depositP2SHAmount = voutSats;
                 depositTxVout = static_cast<uint32_t>(n.get_int());
             }
             break; // done searching
@@ -2183,26 +2186,28 @@ bool BtcWalletConnector<CryptoProvider>::checkDepositTransaction(const std::stri
         return true; // done
     }
 
-    // Check if there's enough to cover fees
-    const double counterpartyFees = totalVinAmount - totalVoutAmount;
-    const double fee1 = minTxFee1(static_cast<uint32_t>(vins.size()), static_cast<uint32_t>(vouts.size())); // p2sh deposit fee
-    const double fee2 = minTxFee2(1, 1); // p2sh redeem fee
-    const double ourMinimumFees = fee1 * 0.95; // Allow 5% margin of error in fee amount
+    // Check if there's enough to cover fees (integer sats; the 5% margin is
+    // kept as policy, computed without floating point)
+    const CAmount counterpartyFees = totalVinAmount - totalVoutAmount;
+    const CAmount fee1Sats = xbridge::xBridgeWalletSatsFromReal(minTxFee1(static_cast<uint32_t>(vins.size()), static_cast<uint32_t>(vouts.size())), COIN); // p2sh deposit fee
+    const CAmount fee2Sats = xbridge::xBridgeWalletSatsFromReal(minTxFee2(1, 1), COIN); // p2sh redeem fee
+    const CAmount ourMinimumFees = fee1Sats - fee1Sats / 20; // Allow 5% margin of error in fee amount
     // Check that counterparty provided enough to cover deposit network fee
     if (counterpartyFees < 0 || counterpartyFees < ourMinimumFees) {
         LOG() << "tx " << depositTxId << " not enough inputs to cover p2sh deposit fees: " << ourMinimumFees << " " << __FUNCTION__;
         return true; // done
     }
-    // Make sure counterparty provided enough for the redeem fee
-    if (depositP2SHAmount < amount + fee2 * 0.95) { // Allow 5% margin of error in fee amount
-        LOG() << "tx " << depositTxId << " not enough inputs to cover p2sh redeem fees: " << fee2 * 0.95 << " " << __FUNCTION__;
+    // Make sure counterparty provided enough for the redeem fee (same 5%
+    // margin on the fee side)
+    if (depositP2SHAmount < amountSats + fee2Sats - fee2Sats / 20) { // Allow 5% margin of error in fee amount
+        LOG() << "tx " << depositTxId << " not enough inputs to cover p2sh redeem fees: " << (fee2Sats - fee2Sats / 20) << " " << __FUNCTION__;
         return true; // done
     }
-    // we should pay ourselves any excess
-    if (depositP2SHAmount > amount + fee2)
-        excessAmount = depositP2SHAmount - amount - fee2;
+    // we should pay ourselves any excess: shared rule with the payment
+    // builder, strict integer cover only (see xBridgeExcessSats)
+    excessSats = xbridge::xBridgeExcessSats(static_cast<uint64_t>(depositP2SHAmount), amountSats, fee2Sats);
 
-    p2shAmount = depositP2SHAmount * COIN;
+    p2shAmount = static_cast<uint64_t>(depositP2SHAmount);
     isGood = true;
     return true; // done
 }

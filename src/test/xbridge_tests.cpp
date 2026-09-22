@@ -3,11 +3,15 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <test/test_bitcoin.h>
+#include <primitives/transaction.h>
 #include <rpc/protocol.h>
+#include <script/script.h>
+#include <script/standard.h>
 #include <serialize.h>
 #include <streams.h>
 #include <uint256.h>
 #include <util/moneystr.h>
+#include <xbridge/currencypair.h>
 #include <xbridge/xbridgeapp.h>
 #include <xbridge/xbridgedb.h>
 #include <xbridge/util/xutil.h>
@@ -16,6 +20,9 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+
+// Declared in rpcxbridge.cpp (same extern precedent as xseries.cpp).
+extern CurrencyPair TxOutToCurrencyPair(const std::vector<CTxOut> & vout, std::string& snode_pubkey);
 
 BOOST_FIXTURE_TEST_SUITE(xbridge_tests, BasicTestingSetup)
 
@@ -357,6 +364,14 @@ BOOST_AUTO_TEST_CASE(xbridge_redeem_retry_policy) {
     // expire to watch loop; cancel would risk stranding funds.
     BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-26, 0, 2, false) == R::Expire);
     BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(RPCErrorCode::RPC_MISC_ERROR, 0, 2, false) == R::Expire);
+    // Malformed send replies (-1) and unset codes (sentinel) must expire in
+    // every watch state: never retry-loop a possibly-broadcast pay tx, and
+    // never cancel on a code nobody assigned.
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-1, 0, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-1, 0, 2, true) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(-1, 2, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(xbridge::REDEEM_ERR_UNSET, 0, 2, false) == R::Expire);
+    BOOST_CHECK(xbridge::xBridgeRedeemRetryClass(xbridge::REDEEM_ERR_UNSET, 0, 2, true) == R::Expire);
 }
 
 // Exact amount strings for the wallet RPC (replaces double serialization):
@@ -427,23 +442,47 @@ BOOST_AUTO_TEST_CASE(xbridge_wallet_sats_from_real) {
 // Payment output rule (mirrors redeemOrderCounterpartyDeposit): exact
 // on-chain P2SH sats less the integer redeem fee, paying excess only when
 // the deposit strictly covers amount + fee (checkDepositTransaction rule).
+// Drives the live shared helper (xBridgeExcessSats), so builder and
+// verifier cannot drift apart undetected.
 BOOST_AUTO_TEST_CASE(xbridge_payment_sats_rule) {
-    const auto excessRule = [](uint64_t p2sh, CAmount toSats, CAmount fee2sats) {
-        return (p2sh > static_cast<uint64_t>(toSats + fee2sats))
-                   ? static_cast<CAmount>(p2sh) - toSats - fee2sats
-                   : 0;
-    };
     const CAmount toSats{980000}, fee2sats{10000};
     // Exact deposit: no excess, output is the order amount.
-    BOOST_CHECK_EQUAL(excessRule(990000, toSats, fee2sats), CAmount{0});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeExcessSats(990000, toSats, fee2sats), CAmount{0});
     // Overpaid deposit: excess paid to redeemer.
-    BOOST_CHECK_EQUAL(excessRule(995000, toSats, fee2sats), CAmount{5000});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeExcessSats(995000, toSats, fee2sats), CAmount{5000});
     // Marginally short deposit (fee tolerance band): output stays the order
     // amount, never reduced by truncation.
-    BOOST_CHECK_EQUAL(excessRule(989999, toSats, fee2sats), CAmount{0});
+    BOOST_CHECK_EQUAL(xbridge::xBridgeExcessSats(989999, toSats, fee2sats), CAmount{0});
     // Refund rule: order amount converts exactly, input is amount + fee.
     BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800}, 100000000), toSats);
     BOOST_CHECK_EQUAL(xbridge::xBridgeDescrToSats(CAmount{9800 + 100}, 100000000), CAmount{990000});
+}
+
+// On-chain order records with negative amounts must be rejected before the
+// uint64_t cast in TxOutToCurrencyPair (a negative would wrap to a huge
+// amount). Driven through a real OP_RETURN output like a scanned chain tx.
+BOOST_AUTO_TEST_CASE(xbridge_txout_negative_amount_rejected) {
+    const auto makeOut = [](const int64_t fromAmt, const int64_t toAmt) {
+        UniValue info(UniValue::VARR);
+        info.push_back("91d0ea83edc79b9a2041c51d08037cff87c181efb311a095dfdd4edbcc7993a9");
+        info.push_back("BLOCK");
+        info.push_back(fromAmt);
+        info.push_back("LTC");
+        info.push_back(toAmt);
+        const std::string str = info.write();
+        CScript script = CScript() << OP_RETURN
+                                   << std::vector<unsigned char>(str.begin(), str.end());
+        return CTxOut(0, script);
+    };
+    std::string snode;
+    const CurrencyPair badFrom = TxOutToCurrencyPair({makeOut(-5, 5000000)}, snode);
+    BOOST_CHECK(badFrom.tag == CurrencyPair::Tag::Error);
+    BOOST_CHECK_EQUAL(badFrom.error(), "Bad from amount");
+    const CurrencyPair badTo = TxOutToCurrencyPair({makeOut(11220000, -7)}, snode);
+    BOOST_CHECK(badTo.tag == CurrencyPair::Tag::Error);
+    BOOST_CHECK_EQUAL(badTo.error(), "Bad to amount");
+    const CurrencyPair good = TxOutToCurrencyPair({makeOut(11220000, 5000000)}, snode);
+    BOOST_CHECK(good.tag == CurrencyPair::Tag::Valid);
 }
 
 // XTxIn carries integer wallet sats (no double -> no truncation in
