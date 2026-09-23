@@ -75,7 +75,12 @@ void RPCNestedTests::rpcNestedTests()
     QVERIFY(result == result2);
 
     RPCConsole::RPCExecuteCommandLine(*node, result, "getblock(getbestblockhash())[tx][0]", &filtered);
-    QVERIFY(result == "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b");
+    // Blocknet mainnet genesis coinbase (AppInit reselects mainnet from the
+    // empty test args, hence getbestblockhash is the mainnet genesis; the
+    // merkle root asserted in chainparams.cpp equals the single-tx coinbase
+    // id. Upstream expects Bitcoin's 4a5e1e… on the same grounds.)
+    // QCOMPARE (not QVERIFY) so failures print the actual value.
+    QCOMPARE(QString::fromStdString(result), QString("b1f0e93f6df55af4c23a0719ab33be2b8115e2b6127fc1d926a06c60a8b56bf2"));
     QVERIFY(filtered == "getblock(getbestblockhash())[tx][0]");
 
     RPCConsole::RPCParseCommandLine(nullptr, result, "importprivkey", false, &filtered);

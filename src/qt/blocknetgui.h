@@ -160,11 +160,10 @@ protected:
     /** Open the OptionsDialog on the specified tab index */
     void openOptionsDialogWithTab(OptionsDialog::Tab tab);
 
-Q_SIGNALS:
-    /** Signal raised when a URI was entered or dragged to the GUI */
-    void receivedURI(const QString &uri);
-    /** Signal raised when RPC console shown */
-    void consoleShown(RPCConsole* console);
+    // NOTE: receivedURI()/consoleShown() are intentionally NOT re-declared
+    // here. They are inherited from BitcoinGUIObj; re-declaring them would
+    // shadow the base signals, so base-class connects (AppTests, the payment
+    // server URI handler) would silently never fire.
 
 public Q_SLOTS:
     /** Set number of connections shown in the UI */

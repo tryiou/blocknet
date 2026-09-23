@@ -68,9 +68,13 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(const interface
                 }
                 if (wtx.is_coinbase)
                 {
-                    if (i == 0)
-                        continue; // skip coinbase, instead track coinstake below
-                    if (wtx.tx->vout.size() > 2) { // if stake-to-address
+                    if (i == 0) {
+                        if (wtx.tx->IsCoinStake())
+                            continue; // skip coinstake marker, instead track coinstake below
+                        // PoW coinbase reward (single-output, non-stake):
+                        // show it as Generated instead of hiding it.
+                        sub.type = TransactionRecord::Generated;
+                    } else if (wtx.tx->vout.size() > 2) { // if stake-to-address
                         if (i == 1)
                             continue; // skip stake-to-address coinstake vouts
                         else if (i >= 2)
