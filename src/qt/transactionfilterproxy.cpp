@@ -116,12 +116,14 @@ void TransactionFilterProxy::setSearchString(const QString &search_string)
 
 void TransactionFilterProxy::setTypeFilter(quint32 modes)
 {
+    if (typeFilter == modes) return;
     this->typeFilter = modes;
     invalidateFilter();
 }
 
 void TransactionFilterProxy::setMinAmount(const CAmount& minimum)
 {
+    if (minAmount == minimum) return;
     this->minAmount = minimum;
     invalidateFilter();
 }

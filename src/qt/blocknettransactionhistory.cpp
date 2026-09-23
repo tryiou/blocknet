@@ -460,11 +460,13 @@ void BlocknetTransactionHistoryFilterProxy::setAddressPrefix(const QString &pref
 }
 
 void BlocknetTransactionHistoryFilterProxy::setMinAmount(const CAmount &minimum) {
+    if (minAmount == minimum) return;
     this->minAmount = minimum;
     invalidateFilter();
 }
 
 void BlocknetTransactionHistoryFilterProxy::setTypeFilter(quint32 types) {
+    if (typeFilter == types) return;
     this->typeFilter = types;
     invalidateFilter();
 }
