@@ -150,6 +150,14 @@ private:
     quint32 typeFilter;
     QDateTime dateFrom;
     QDateTime dateTo;
+    // Integer-second copies of the range above, precomputed in setDateRange().
+    // The per-row filter compares TransactionRecord::time (plain qint64 seconds)
+    // against these instead of converting every row through QDateTime (which
+    // re-runs mktime/tzset per comparison). Valid only when dateBoundsValid;
+    // an invalid bound keeps the legacy QDateTime path.
+    qint64 dateFromSecs{0};
+    qint64 dateToSecs{0xFFFFFFFFLL};
+    bool dateBoundsValid{true};
 };
 
 #include <QStyledItemDelegate>

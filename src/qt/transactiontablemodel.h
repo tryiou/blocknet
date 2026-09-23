@@ -91,6 +91,10 @@ private:
     TransactionTablePriv *priv;
     bool fProcessingQueuedTransactions;
     const PlatformStyle *platformStyle;
+    /* Last chain height pushed via updateConfirmations(). priv->index() uses
+     * it to skip wallet lookups for rows that are already current. GUI-thread
+     * confined (written by the queued updateConfirmations, read by index()). */
+    int m_cachedHeight{-1};
 
     void subscribeToCoreSignals();
     void unsubscribeFromCoreSignals();
@@ -111,7 +115,11 @@ public:
 public Q_SLOTS:
     /* New transaction, or transaction changed status */
     void updateTransaction(const QString &hash, int status, bool showTransaction);
-    void updateConfirmations();
+    /* Blocks came in since last poll: refresh confirmation-dependent display
+     * for rows whose status is stale. numBlocks is the current chain height
+     * supplied by the caller (no new chain reads inside). Emits dataChanged
+     * only over dirty spans; emits nothing when everything is current. */
+    void updateConfirmations(int numBlocks);
     void updateDisplayUnit();
     /** Updates the column title to "Amount (DisplayUnit)" and emits headerDataChanged() signal for table headers to react. */
     void updateAmountColumnTitle();

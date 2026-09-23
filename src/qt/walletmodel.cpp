@@ -96,16 +96,28 @@ void WalletModel::pollBalanceChanged()
         return;
     }
 
-    if(fForceCheckBalanceChanged || m_node.getNumBlocks() != cachedNumBlocks)
+    // tryGetBalances already fetched the chain height under the same locks,
+    // so reuse it instead of reading the tip twice.
+    if(fForceCheckBalanceChanged || numBlocks != cachedNumBlocks)
     {
         fForceCheckBalanceChanged = false;
 
         // Balance and number of transactions might have changed
-        cachedNumBlocks = m_node.getNumBlocks();
+        cachedNumBlocks = numBlocks;
 
         checkBalanceChanged(new_balances);
-        if(transactionTableModel)
-            transactionTableModel->updateConfirmations();
+        if(transactionTableModel) {
+            // Model updates must run on the GUI thread; this worker thread
+            // only gathered data. Queued delivery also serializes bursts.
+            // Staleness bound: if the tip advances between this capture and
+            // slot execution, the table lags by at most one poll interval
+            // (MODEL_UPDATE_DELAY), same as the old slot-side getNumBlocks()
+            // read under a racing tip. Balances above were computed against
+            // this same numBlocks, so table and balance stay mutually
+            // consistent, which is what the GUI promises.
+            QMetaObject::invokeMethod(transactionTableModel, "updateConfirmations",
+                                      Qt::QueuedConnection, Q_ARG(int, numBlocks));
+        }
     }
 
     pollActive = false;

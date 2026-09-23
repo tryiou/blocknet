@@ -439,8 +439,16 @@ BlocknetTransactionHistoryFilterProxy::BlocknetTransactionHistoryFilterProxy(Opt
                                                                                                                  addrPrefix(QString()),
                                                                                                                  minAmount(0),
                                                                                                                  typeFilter(COMMON_TYPES),
-                                                                                                                 dateFrom(MIN_DATE),
-                                                                                                                 dateTo(MAX_DATE) { }
+                                                                                                                  dateFrom(MIN_DATE),
+                                                                                                                  dateTo(MAX_DATE) {
+    // Derive the integer bounds from the defaults above (do not rely on the
+    // member initializers matching MIN_DATE/MAX_DATE by coincidence).
+    dateBoundsValid = dateFrom.isValid() && dateTo.isValid();
+    if (dateBoundsValid) {
+        dateFromSecs = dateFrom.toSecsSinceEpoch();
+        dateToSecs = dateTo.toSecsSinceEpoch();
+    }
+}
 
 void BlocknetTransactionHistoryFilterProxy::setLimit(int limit) {
     this->limitRows = limit;
@@ -464,6 +472,13 @@ void BlocknetTransactionHistoryFilterProxy::setTypeFilter(quint32 types) {
 void BlocknetTransactionHistoryFilterProxy::setDateRange(const QDateTime &from, const QDateTime &to) {
     this->dateFrom = from;
     this->dateTo = to;
+    // Precompute integer bounds once; the per-row filter then avoids all
+    // QDateTime conversion. Invalid bounds keep the legacy compare path.
+    this->dateBoundsValid = from.isValid() && to.isValid();
+    if (this->dateBoundsValid) {
+        this->dateFromSecs = from.toSecsSinceEpoch();
+        this->dateToSecs = to.toSecsSinceEpoch();
+    }
     invalidateFilter();
 }
 
@@ -474,15 +489,28 @@ bool BlocknetTransactionHistoryFilterProxy::filterAcceptsRow(int sourceRow, cons
     if (!(TYPE(type) & typeFilter))
         return false;
 
-    QDateTime datetime = index.data(TransactionTableModel::DateRole).toDateTime();
+    // Fetch the record time once for the range check below (EditRole on
+    // the Date column is TransactionRecord::time, a plain qint64). Skipped
+    // when bounds are invalid: the legacy path reads DateRole instead.
+    const qint64 t = dateBoundsValid
+        ? sourceModel()->index(sourceRow, TransactionTableModel::Date, sourceParent).data(Qt::EditRole).toLongLong()
+        : 0;
+    if (dateBoundsValid) {
+        // Fast path: inclusive [from, to], identical to the QDateTime
+        // comparison for all in-range timestamps (see setDateRange).
+        if (t < dateFromSecs || t > dateToSecs)
+            return false;
+    } else {
+        const QDateTime datetime = index.data(TransactionTableModel::DateRole).toDateTime();
+        if (datetime < dateFrom || datetime > dateTo)
+            return false;
+    }
     QString address = index.data(TransactionTableModel::AddressRole).toString();
     QString label = index.data(TransactionTableModel::LabelRole).toString();
     qint64 amount = llabs(index.data(TransactionTableModel::AmountRole).toLongLong());
     int status = index.data(TransactionTableModel::StatusRole).toInt();
 
     if (status == TransactionStatus::Conflicted)
-        return false;
-    if (datetime < dateFrom || datetime > dateTo)
         return false;
     if (!address.contains(addrPrefix, Qt::CaseInsensitive) && !label.contains(addrPrefix, Qt::CaseInsensitive))
         return false;

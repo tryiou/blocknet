@@ -191,6 +191,17 @@ public:
             // stuck if the core is holding the locks for a longer time - for
             // example, during a wallet rescan.
             //
+            // Fast path: rows already current for the last published height
+            // need no wallet lookup at all (two integer compares). This is
+            // what makes per-row proxy/view fetches cheap; stale rows fall
+            // through to the refresh below. Freshness is still bounded by
+            // updateConfirmations cadence, exactly as before.
+            // cur_num_blocks >= 0 guard: records never fetched (fresh model,
+            // before the first updateConfirmations) must always look up once,
+            // preserving the old first-paint behavior.
+            if (rec.status.cur_num_blocks >= 0 && !rec.statusUpdateNeeded(parent->m_cachedHeight)) {
+                return &cachedWallet[idx];
+            }
             // If a status update is needed (blocks came in since last check),
             //  update the status of this transaction from the wallet. Otherwise,
             // simply re-use the cached status.
@@ -257,14 +268,55 @@ void TransactionTableModel::updateTransaction(const QString &hash, int status, b
     priv->updateWallet(walletModel->wallet(), updated, status, showTransaction);
 }
 
-void TransactionTableModel::updateConfirmations()
+void TransactionTableModel::updateConfirmations(int numBlocks)
 {
-    // Blocks came in since last poll.
-    // Invalidate status (number of confirmations) and (possibly) description
-    //  for all rows. Qt is smart enough to only actually request the data for the
-    //  visible rows.
-    Q_EMIT dataChanged(index(0, Status), index(priv->size()-1, Status));
-    Q_EMIT dataChanged(index(0, ToAddress), index(priv->size()-1, ToAddress));
+    // Blocks came in since last poll. Only rows whose cached status is stale
+    // for this height need work: statusUpdateNeeded() is two integer compares
+    // and runs without touching the wallet. Stale rows pay one
+    // tryGetTxStatus each; dataChanged is emitted solely over dirty spans
+    // (Status + ToAddress, as before). Clean chain, clean table: no emit.
+    // The lock is held across the emits deliberately: cachedWalletMutex is a
+    // RecursiveMutex (see priv declaration) so re-entrant data() calls from
+    // connected views are safe, and holding it keeps the QList backing store
+    // stable under the createIndex internal pointers (same pattern as
+    // priv->updateWallet below).
+    LOCK(priv->cachedWalletMutex);
+    const int n = priv->cachedWallet.size();
+    if (n == 0)
+        return;
+    // Publish the height first: priv->index() fast-paths rows that are
+    // already current for it, so per-row wallet lookups happen only for
+    // rows that actually went stale.
+    m_cachedHeight = numBlocks;
+    interfaces::Wallet& wallet = walletModel->wallet();
+    int spanStart = -1;
+    int spanEnd = -1;
+    for (int i = 0; i < n; ++i) {
+        TransactionRecord& rec = priv->cachedWallet[i];
+        if (!rec.statusUpdateNeeded(numBlocks)) {
+            if (spanStart >= 0) {
+                Q_EMIT dataChanged(createIndex(spanStart, Status, &priv->cachedWallet[spanStart]),
+                                   createIndex(spanEnd, ToAddress, &priv->cachedWallet[spanEnd]));
+                spanStart = -1;
+            }
+            continue;
+        }
+        interfaces::WalletTxStatus wtx;
+        int curBlocks = 0;
+        int64_t block_time = 0;
+        if (wallet.tryGetTxStatus(rec.hash, wtx, curBlocks, block_time)) {
+            rec.updateStatus(wtx, curBlocks, block_time);
+        }
+        // Row is (or stays) dirty: extend the span. A failed try-lock leaves
+        // cur_num_blocks stale, so the row is retried on the next poll.
+        if (spanStart < 0)
+            spanStart = i;
+        spanEnd = i;
+    }
+    if (spanStart >= 0) {
+        Q_EMIT dataChanged(createIndex(spanStart, Status, &priv->cachedWallet[spanStart]),
+                           createIndex(spanEnd, ToAddress, &priv->cachedWallet[spanEnd]));
+    }
 }
 
 int TransactionTableModel::rowCount(const QModelIndex &parent) const
@@ -319,11 +371,17 @@ QString TransactionTableModel::formatTxStatus(const TransactionRecord *wtx) cons
 
 QString TransactionTableModel::formatTxDate(const TransactionRecord *wtx) const
 {
-    if(wtx->time)
+    if(!wtx->time)
     {
-        return GUIUtil::dateTimeStr(wtx->time);
+        return QString();
     }
-    return QString();
+    // Lazy per-record cache: time is immutable after decomposeTransaction,
+    // so the formatted string is computed once instead of on every repaint.
+    if(wtx->m_dateStr.isEmpty())
+    {
+        wtx->m_dateStr = GUIUtil::dateTimeStr(wtx->time);
+    }
+    return wtx->m_dateStr;
 }
 
 /* Look up address in address book, if found return label (address)
@@ -578,7 +636,13 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const
     case TypeRole:
         return rec->type;
     case DateRole:
-        return QDateTime::fromTime_t(static_cast<uint>(rec->time));
+        if (!rec->m_dateCached) {
+            // Cache the conversion: fromTime_t() re-runs mktime/tzset work
+            // on every call, and this role is fetched per row per filter pass.
+            rec->m_dateTime = QDateTime::fromTime_t(static_cast<uint>(rec->time));
+            rec->m_dateCached = true;
+        }
+        return rec->m_dateTime;
     case WatchonlyRole:
         return rec->involvesWatchAddress;
     case WatchonlyDecorationRole:

@@ -26,6 +26,13 @@ TransactionFilterProxy::TransactionFilterProxy(QObject *parent) :
     limitRows(-1),
     showInactive(true)
 {
+    // Derive the integer bounds from the defaults above (do not rely on the
+    // member initializers matching MIN_DATE/MAX_DATE by coincidence).
+    dateBoundsValid = dateFrom.isValid() && dateTo.isValid();
+    if (dateBoundsValid) {
+        dateFromSecs = dateFrom.toSecsSinceEpoch();
+        dateToSecs = dateTo.toSecsSinceEpoch();
+    }
 }
 
 bool TransactionFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
@@ -46,9 +53,20 @@ bool TransactionFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &
     if (!involvesWatchAddress && watchOnlyFilter == WatchOnlyFilter_Yes)
         return false;
 
-    QDateTime datetime = index.data(TransactionTableModel::DateRole).toDateTime();
-    if (datetime < dateFrom || datetime > dateTo)
-        return false;
+    if (dateBoundsValid) {
+        // Fast path: compare raw record seconds (EditRole on the Date column
+        // is TransactionRecord::time, a plain qint64). Inclusive [from, to],
+        // identical to the QDateTime comparison for all in-range timestamps:
+        // fromTime_t() truncates rows to whole seconds and operator< orders
+        // by instant, so the integer test decides the same rows.
+        const qint64 t = sourceModel()->index(sourceRow, TransactionTableModel::Date, sourceParent).data(Qt::EditRole).toLongLong();
+        if (t < dateFromSecs || t > dateToSecs)
+            return false;
+    } else {
+        const QDateTime datetime = index.data(TransactionTableModel::DateRole).toDateTime();
+        if (datetime < dateFrom || datetime > dateTo)
+            return false;
+    }
 
     QString address = index.data(TransactionTableModel::AddressRole).toString();
     QString label = index.data(TransactionTableModel::LabelRole).toString();
@@ -79,6 +97,13 @@ void TransactionFilterProxy::setDateRange(const QDateTime &from, const QDateTime
 {
     this->dateFrom = from;
     this->dateTo = to;
+    // Precompute integer bounds once; the per-row filter then avoids all
+    // QDateTime conversion. Invalid bounds keep the legacy compare path.
+    this->dateBoundsValid = from.isValid() && to.isValid();
+    if (this->dateBoundsValid) {
+        this->dateFromSecs = from.toSecsSinceEpoch();
+        this->dateToSecs = to.toSecsSinceEpoch();
+    }
     invalidateFilter();
 }
 

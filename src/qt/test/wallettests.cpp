@@ -12,7 +12,10 @@
 #include <qt/sendcoinsdialog.h>
 #include <qt/sendcoinsentry.h>
 #include <qt/transactiontablemodel.h>
+#include <qt/transactionfilterproxy.h>
+#include <qt/blocknettransactionhistory.h>
 #include <qt/transactionview.h>
+#include <QSignalSpy>
 #include <qt/walletmodel.h>
 #include <key_io.h>
 #include <test/test_bitcoin.h>
@@ -113,6 +116,26 @@ void BumpFee(TransactionView& view, const uint256& txid, bool expectDisabled, st
     }
     action->trigger();
     QVERIFY(text.indexOf(QString::fromStdString(expectError)) != -1);
+}
+
+//! Add a plain (non-coinbase, non-coinstake) payment to the wallet by hand
+//! and return its txid. Needed because Blocknet's decomposeTransaction skips
+//! PoW coinbase outputs (it tracks coinstakes instead), so mined fixture
+//! blocks never produce table rows; hand-added payments exercise the real
+//! decompose/filter/confirm paths without mining, signing, or maturing.
+//! The caller supplies nTimeReceived: sharing one timestamp across payments
+//! keeps same-second boundary assertions deterministic (no second-boundary
+//! straddle between adds).
+uint256 AddPaymentTx(CWallet& wallet, const CKey& key, CAmount amount, int64_t nTimeReceived)
+{
+    CMutableTransaction mtx;
+    mtx.vout.emplace_back(amount, GetScriptForRawPubKey(key.GetPubKey()));
+    CWalletTx wtx(&wallet, MakeTransactionRef(mtx));
+    wtx.nTimeReceived = nTimeReceived;
+    LOCK(wallet.cs_wallet);
+    wallet.LoadToWallet(wtx);
+    assert(wallet.mapWallet.count(wtx.GetHash()) == 1);
+    return wtx.GetHash();
 }
 
 //! Simple qt wallet tests.
@@ -246,6 +269,177 @@ void TestGUI()
 }
 
 } // namespace
+
+void WalletTests::filterDateTests()
+{
+#ifdef Q_OS_MAC
+    if (QApplication::platformName() == "minimal") {
+        QWARN("Skipping filterDateTests on mac build with 'minimal' platform (QTBUG-49686).");
+        return;
+    }
+#endif
+    // Hermetic fixture: plain TestingSetup (no mining) + hand-added payments.
+    // Mined coinbases would yield zero rows here (Blocknet decompose skips
+    // PoW coinbase outputs), so payments fund the model instead. All payments
+    // land in the same second, which keeps boundary assertions deterministic:
+    // a single-point range contains every row, a ±1s range contains none.
+    TestingSetup test;
+    auto chain = interfaces::MakeChain();
+    std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(*chain, WalletLocation(), WalletDatabase::CreateMock());
+    bool firstRun;
+    wallet->LoadWallet(firstRun);
+    CKey key;
+    key.MakeNewKey(true);
+    {
+        LOCK(wallet->cs_wallet);
+        wallet->AddKeyPubKey(key, key.GetPubKey());
+    }
+    const int NTX = 3;
+    const int64_t NTIME = GetTime();
+    for (int i = 0; i < NTX; ++i) {
+        AddPaymentTx(*wallet, key, (i + 1) * COIN, NTIME);
+    }
+    std::unique_ptr<const PlatformStyle> platformStyle(PlatformStyle::instantiate("other"));
+    auto node = interfaces::MakeNode();
+    OptionsModel optionsModel(*node);
+    AddWallet(wallet);
+    WalletModel walletModel(std::move(node->getWallets().back()), *node, platformStyle.get(), &optionsModel);
+    RemoveWallet(wallet);
+
+    TransactionTableModel* ttm = walletModel.getTransactionTableModel();
+    QCOMPARE(ttm->rowCount({}), NTX);
+    const int total = ttm->rowCount({});
+
+    TransactionFilterProxy proxy;
+    proxy.setSourceModel(ttm);
+    // Default [MIN_DATE, MAX_DATE] range shows everything.
+    QCOMPARE(proxy.rowCount(), total);
+
+    // Witness row: single-point inclusive range must contain it, ±1s must not.
+    // Boundaries are derived from live DateRole values (no hardcoded epochs).
+    // All fixture rows share one second, so the point range holds every row.
+    const QModelIndex witness = ttm->index(0, TransactionTableModel::Date);
+    const QDateTime dt = witness.data(TransactionTableModel::DateRole).toDateTime();
+    QVERIFY(dt.isValid());
+    proxy.setDateRange(dt, dt);
+    QCOMPARE(proxy.rowCount(), total);
+    QVERIFY(proxy.mapFromSource(ttm->index(0, 0)).isValid());
+    proxy.setDateRange(dt.addSecs(1), TransactionFilterProxy::MAX_DATE);
+    QCOMPARE(proxy.rowCount(), 0);
+    QVERIFY(!proxy.mapFromSource(ttm->index(0, 0)).isValid());
+    proxy.setDateRange(TransactionFilterProxy::MIN_DATE, dt.addSecs(-1));
+    QCOMPARE(proxy.rowCount(), 0);
+    QVERIFY(!proxy.mapFromSource(ttm->index(0, 0)).isValid());
+
+    // Invalid bound exercises the legacy QDateTime compare path: the same
+    // logical full range through the legacy path must show the same rows.
+    proxy.setDateRange(QDateTime(), TransactionFilterProxy::MAX_DATE);
+    QCOMPARE(proxy.rowCount(), total);
+
+    // Full range again: everything visible.
+    proxy.setDateRange(TransactionFilterProxy::MIN_DATE, TransactionFilterProxy::MAX_DATE);
+    QCOMPARE(proxy.rowCount(), total);
+
+    // Same assertions through the history-tab proxy (own int-compare path).
+    BlocknetTransactionHistoryFilterProxy hproxy(&optionsModel);
+    hproxy.setSourceModel(ttm);
+    hproxy.setTypeFilter(BlocknetTransactionHistoryFilterProxy::ALL_TYPES);
+    QCOMPARE(hproxy.rowCount(QModelIndex()), total);
+    hproxy.setDateRange(dt, dt);
+    QCOMPARE(hproxy.rowCount(QModelIndex()), total);
+    QVERIFY(hproxy.mapFromSource(ttm->index(0, 0)).isValid());
+    hproxy.setDateRange(dt.addSecs(1), BlocknetTransactionHistoryFilterProxy::MAX_DATE);
+    QCOMPARE(hproxy.rowCount(QModelIndex()), 0);
+    QVERIFY(!hproxy.mapFromSource(ttm->index(0, 0)).isValid());
+    hproxy.setDateRange(BlocknetTransactionHistoryFilterProxy::MIN_DATE, dt.addSecs(-1));
+    QCOMPARE(hproxy.rowCount(QModelIndex()), 0);
+    QVERIFY(!hproxy.mapFromSource(ttm->index(0, 0)).isValid());
+    hproxy.setDateRange(QDateTime(), BlocknetTransactionHistoryFilterProxy::MAX_DATE);
+    QCOMPARE(hproxy.rowCount(QModelIndex()), total);
+    hproxy.setDateRange(BlocknetTransactionHistoryFilterProxy::MIN_DATE, BlocknetTransactionHistoryFilterProxy::MAX_DATE);
+    QCOMPARE(hproxy.rowCount(QModelIndex()), total);
+}
+
+void WalletTests::confirmationsDirtyTests()
+{
+#ifdef Q_OS_MAC
+    if (QApplication::platformName() == "minimal") {
+        QWARN("Skipping confirmationsDirtyTests on mac build with 'minimal' platform (QTBUG-49686).");
+        return;
+    }
+#endif
+    // Chain fixture (not the rescan): tryGetTxStatus reports the real chain
+    // height per row, so the pushed height must equal the tip for rows to
+    // converge. Rows come from hand-added payments: mined coinbases yield
+    // zero rows here (Blocknet decompose skips PoW coinbase outputs).
+    TestChain100Setup test;
+    auto chain = interfaces::MakeChain();
+    std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(*chain, WalletLocation(), WalletDatabase::CreateMock());
+    bool firstRun;
+    wallet->LoadWallet(firstRun);
+    CKey key;
+    key.MakeNewKey(true);
+    {
+        LOCK(wallet->cs_wallet);
+        wallet->AddKeyPubKey(key, key.GetPubKey());
+    }
+    const int NTX = 3;
+    const int64_t NTIME = GetTime();
+    for (int i = 0; i < NTX; ++i) {
+        AddPaymentTx(*wallet, key, (i + 1) * COIN, NTIME);
+    }
+    std::unique_ptr<const PlatformStyle> platformStyle(PlatformStyle::instantiate("other"));
+    auto node = interfaces::MakeNode();
+    OptionsModel optionsModel(*node);
+    AddWallet(wallet);
+    WalletModel walletModel(std::move(node->getWallets().back()), *node, platformStyle.get(), &optionsModel);
+    RemoveWallet(wallet);
+
+    TransactionTableModel* ttm = walletModel.getTransactionTableModel();
+    QCOMPARE(ttm->rowCount({}), NTX);
+
+    // First refresh at the tip height updates all stale rows (fresh records
+    // start with cur_num_blocks == -1): exactly one span covering Status
+    // through ToAddress over every row. That is the whole optimization:
+    // Status + ToAddress, nothing else, no per-clean-row work.
+    QSignalSpy spy(ttm, &QAbstractItemModel::dataChanged);
+    const int tipHeight = chainActive.Height();
+    ttm->updateConfirmations(tipHeight);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toModelIndex().row(), 0);
+    QCOMPARE(spy.at(0).at(0).toModelIndex().column(), TransactionTableModel::Status);
+    QCOMPARE(spy.at(0).at(1).toModelIndex().row(), NTX - 1);
+    QCOMPARE(spy.at(0).at(1).toModelIndex().column(), TransactionTableModel::ToAddress);
+    spy.clear();
+    // A repeated refresh at the same height must emit nothing. tryGetTxStatus
+    // uses try-locks, so a concurrent WalletModel poll worker could (rarely)
+    // leave a row dirty; retry a few times. An implementation that always
+    // emits still fails: it never converges to zero.
+    ttm->updateConfirmations(tipHeight);
+    for (int i = 0; i < 2 && spy.count() > 0; ++i) {
+        spy.clear();
+        ttm->updateConfirmations(tipHeight);
+    }
+    QCOMPARE(spy.count(), 0);
+    // Incremental add inserts one stale record at its hash-sorted position
+    // while the rest are current: the next refresh must emit exactly one
+    // single-row span over Status..ToAddress. Only single-row-ness and the
+    // columns are asserted, not the position: any data() lookup would run
+    // the index() fast-path and converge the row before the refresh runs.
+    // Combined with the proven silence above, a single-row span must cover
+    // exactly the new record.
+    const uint256 hash4 = AddPaymentTx(*wallet, key, 4 * COIN, NTIME);
+    ttm->updateTransaction(QString::fromStdString(hash4.ToString()), CT_NEW, true);
+    QCOMPARE(ttm->rowCount({}), NTX + 1);
+    ttm->updateConfirmations(tipHeight);
+    QCOMPARE(spy.count(), 1);
+    const int top = spy.at(0).at(0).toModelIndex().row();
+    const int bottom = spy.at(0).at(1).toModelIndex().row();
+    QCOMPARE(top, bottom);
+    QCOMPARE(spy.at(0).at(0).toModelIndex().column(), TransactionTableModel::Status);
+    QCOMPARE(spy.at(0).at(1).toModelIndex().row(), top);
+    QCOMPARE(spy.at(0).at(1).toModelIndex().column(), TransactionTableModel::ToAddress);
+}
 
 void WalletTests::walletTests()
 {

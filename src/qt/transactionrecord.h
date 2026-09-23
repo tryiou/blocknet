@@ -8,6 +8,7 @@
 #include <amount.h>
 #include <uint256.h>
 
+#include <QDateTime>
 #include <QList>
 #include <QString>
 
@@ -25,7 +26,8 @@ class TransactionStatus
 public:
     TransactionStatus():
         countsForBalance(false), sortKey(""),
-        matures_in(0), status(Unconfirmed), depth(0), open_for(0), cur_num_blocks(-1)
+        matures_in(0), status(Unconfirmed), depth(0), open_for(0), cur_num_blocks(-1),
+        needsUpdate(false)
     { }
 
     enum Status {
@@ -124,6 +126,25 @@ public:
 
     /** Subtransaction index, for sort key */
     int idx;
+
+    /** Cached GUIUtil::dateTimeStr(time), lazily filled on first display.
+     * Valid because time never changes after decomposeTransaction.
+     * Invalidation contract: in-app language change sets restart-required
+     * (OptionsModel), so m_dateStr cannot go stale mid-session; the only
+     * residual vector is an OS timezone change while running, which leaves
+     * dates stale until restart (accepted: negligible, same class as every
+     * other cached string/icon in the GUI). clearDateCache() is the manual
+     * hook for that vector or any future runtime-locale path, hence it has
+     * no callers today by design, not by omission.
+     * QString is implicitly shared; all users are GUI-thread confined. */
+    mutable QString m_dateStr;
+    /** Cached QDateTime::fromTime_t(time) for the DateRole, same validity. */
+    mutable QDateTime m_dateTime;
+    mutable bool m_dateCached{false};
+
+    /** Drop cached date values (call if system locale/timezone ever changes
+     * mid-session; language change currently requires restart). */
+    void clearDateCache() const { m_dateStr.clear(); m_dateCached = false; }
 
     /** Status: can change with block chain update */
     TransactionStatus status;
