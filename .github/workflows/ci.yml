@@ -23,7 +23,9 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   guix-matrix:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    # 360min (hosted-runner max): proves 300 timeout-kills healthy mid-compile
+    # jobs when substitutes are sick (run 36052155190: 3 jobs died at 5h00m).
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:

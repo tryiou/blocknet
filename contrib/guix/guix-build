@@ -454,9 +454,16 @@ EOF
         #    more information.
         #
         # shellcheck disable=SC2086,SC2031
-        # Single attempt for deterministic builds — no retry on static failures (wastes time).
-        # Transient fport_read failures are rare with persistent /gnu/store and no --disable-chroot.
+        # Retry the time-machine bootstrap (up to 3 attempts). The pinned
+        # channel commit is deterministic, but substitute fetches are not:
+        # ci.guix.gnu.org stalls ("server is somewhat slow") can trip the
+        # upstream display-download-progress crash (guix #38493/#55337) on
+        # *any* large download (observed on gcc-14.3.0-deb@, then lzi@).
+        # Within one job the container and /gnu/store persist, so a retry
+        # resumes mostly-cached instead of starting over. Genuinely static
+        # (Blocknet) failures still fail the job once attempts are exhausted.
         rc=0
+        for _attempt in 1 2 3; do
         if time-machine environment --manifest="${PWD}/contrib/guix/manifest.scm" \
                                      --container \
                                      --pure \
@@ -487,13 +494,19 @@ EOF
                                              DISTSRC="$(DISTSRC_BASE=/distsrc-base && distsrc_for_host "$HOST")" \
                                              OUTDIR="$(OUTDIR_BASE=/outdir-base && outdir_for_host "$HOST")" \
                                              DIST_ARCHIVE_BASE=/outdir-base/dist-archive \
-                                           bash -c "cd /blocknet && bash contrib/guix/libexec/build.sh"; then
-            echo "Guix time-machine succeeded for $host"
-        else
-            rc=$?
-            echo "ERROR: Guix time-machine failed for $host (rc=$rc)" >&2
-            exit $rc
-        fi
+                                            bash -c "cd /blocknet && bash contrib/guix/libexec/build.sh"; then
+             echo "Guix time-machine succeeded for $host (attempt $_attempt)"
+             rc=0
+             break
+         else
+             rc=$?
+             echo "WARNING: Guix time-machine failed for $host (attempt $_attempt, rc=$rc)" >&2
+         fi
+         done
+         if [ "$rc" -ne 0 ]; then
+             echo "ERROR: Guix time-machine failed for $host after 3 attempts (rc=$rc)" >&2
+             exit $rc
+         fi
     )
 
 done

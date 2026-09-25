@@ -18,23 +18,22 @@ permissions:
   contents: write
 
 jobs:
-  # ──────────────────────────────────────────────────────────────
-  # Deterministic Guix builds — ALL inside pinned Docker
-  # blocknet-guix:22.04 (FROM ubuntu:22.04 + Guix 1.5.0), glibc 2.35
-  # No host apt, no runner drift, no --disable-chroot.
-  # ──────────────────────────────────────────────────────────────
-  guix-build:
+  # Host list + version, resolved once so tag pushes (no inputs) and manual
+  # dispatches (os_filter/version inputs) share one matrix. Splitting the
+  # build into per-host jobs (instead of one all-hosts job) gives each host
+  # the full runner timeout and lets a flaky host fail alone instead of
+  # killing all six artifacts.
+  setup:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    timeout-minutes: 10
     outputs:
+      hosts: ${{ steps.hosts.outputs.hosts }}
       version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          path: blocknet
           fetch-depth: 0
-
       - name: Determine version
         id: ver
         run: |
@@ -44,14 +43,50 @@ jobs:
             echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           fi
           echo "Ref: ${{ github.ref_name }} / ${{ inputs.version }}"
-          cat blocknet/configure.ac | grep CLIENT_VERSION -m1 || true
+          grep CLIENT_VERSION -m1 configure.ac || true
+      - name: Resolve hosts
+        id: hosts
+        run: |
+          FILTER="${{ inputs.os_filter }}"
+          if [ -z "$FILTER" ] || [ "$FILTER" = "lwm" ]; then
+            HOSTS="x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-mingw32 aarch64-w64-mingw32 arm64-apple-darwin x86_64-apple-darwin"
+          else
+            HOSTS=""
+            case "$FILTER" in *l*) HOSTS="$HOSTS x86_64-linux-gnu aarch64-linux-gnu" ;; esac
+            case "$FILTER" in *w*) HOSTS="$HOSTS x86_64-w64-mingw32 aarch64-w64-mingw32" ;; esac
+            case "$FILTER" in *m*) HOSTS="$HOSTS x86_64-apple-darwin arm64-apple-darwin" ;; esac
+            HOSTS="$(echo $HOSTS | xargs)"
+          fi
+          echo "HOSTS=$HOSTS"
+          JSON="[$(printf '"%s",' $HOSTS | sed 's/,$//')]"
+          echo "hosts=$JSON" >> $GITHUB_OUTPUT
+
+  # ──────────────────────────────────────────────────────────────
+  # Deterministic Guix builds — ALL inside pinned Docker
+  # blocknet-guix:22.04 (FROM ubuntu:22.04 + Guix 1.5.0), glibc 2.35
+  # No host apt, no runner drift, no --disable-chroot.
+  # ──────────────────────────────────────────────────────────────
+  guix-build:
+    needs: setup
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.setup.outputs.hosts) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          path: blocknet
+          fetch-depth: 0
 
       - name: Build Guix image (pinned, cached)
         working-directory: blocknet
         run: DOCKER_BUILDKIT=1 docker build -f contrib/guix/Dockerfile -t blocknet-guix:22.04 .
 
-      - name: Install macOS SDK (when darwin hosts requested)
-        if: ${{ inputs.os_filter == '' || contains(inputs.os_filter, 'm') }}
+      - name: Install macOS SDK (darwin only)
+        if: contains(matrix.host, 'darwin')
         working-directory: blocknet
         run: |
           source contrib/guix/macos-sdk.env
@@ -64,51 +99,47 @@ jobs:
           fi
           ls depends/SDKs/
 
-      - name: Guix build (all hosts, inside Docker, single log)
+      - name: Guix build ${{ matrix.host }} (inside Docker)
         working-directory: blocknet
         run: |
           set -e
-          if [ -n "${{ inputs.os_filter }}" ] && [ "${{ inputs.os_filter }}" != "lwm" ]; then
-            FILTER="${{ inputs.os_filter }}"
-            HOSTS=""
-            case "$FILTER" in *l*) HOSTS="$HOSTS x86_64-linux-gnu aarch64-linux-gnu" ;; esac
-            case "$FILTER" in *w*) HOSTS="$HOSTS x86_64-w64-mingw32 aarch64-w64-mingw32" ;; esac
-            case "$FILTER" in *m*) HOSTS="$HOSTS x86_64-apple-darwin arm64-apple-darwin" ;; esac
-            export HOSTS="$(echo $HOSTS | xargs)"
-          else
-            export HOSTS="x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-mingw32 aarch64-w64-mingw32 arm64-apple-darwin x86_64-apple-darwin"
-          fi
-          echo "HOSTS=$HOSTS"
+          export HOSTS="${{ matrix.host }}"
           export FORCE_DIRTY_WORKTREE=1
           export JOBS="$(nproc)"
           export OUTDIR_BASE="$PWD/../blocknet-binaries"
           mkdir -p "$OUTDIR_BASE"
-          echo "OUTDIR_BASE=$OUTDIR_BASE"
-          # Single log for whole matrix
           set -o pipefail
-          ./contrib/guix/docker-run.sh "$HOSTS" 2>&1 | tee /tmp/guix-matrix.log
+          ./contrib/guix/docker-run.sh "${{ matrix.host }}" 2>&1 | tee /tmp/guix-${{ matrix.host }}.log
           EXIT=${PIPESTATUS[0]}
-          echo "EXIT:$EXIT" | tee -a /tmp/guix-matrix.log
-          ls -R ../blocknet-binaries 2>&1 | head -n 100 || true
-          find ../blocknet-binaries -type f -exec sha256sum {} \; | tee SHA256SUMS || true
-          cat SHA256SUMS || true
+          echo "EXIT:$EXIT" | tee -a /tmp/guix-${{ matrix.host }}.log
+          ls -R ../blocknet-binaries 2>&1 | head -n 30 || true
+          find ../blocknet-binaries -type f -exec sha256sum {} \; || true
           exit $EXIT
 
-      - name: Stage SHA256SUMS and build log
+      - name: Smoke check artifact
+        working-directory: blocknet
         run: |
-          # Stage everything into one root dir so the artifact layout is
-          # predictable after download (upload-artifact strips the LCA):
-          # release-staging/<host>/* , release-staging/SHA256SUMS
-          mkdir -p release-staging
-          cp -a blocknet-binaries/. release-staging/
-          find release-staging -type f ! -name SHA256SUMS.part -exec sha256sum {} \; | sort -k2 > release-staging/SHA256SUMS
-          cat release-staging/SHA256SUMS
-          cp /tmp/guix-matrix.log release-staging/guix-matrix.log
+          ls -lh ../blocknet-binaries/${{ matrix.host }}/ 2>&1 | head -n 20 || true
+          file ../blocknet-binaries/${{ matrix.host }}/* 2>&1 | head -n 20 || true
+          compgen -G "../blocknet-binaries/${{ matrix.host }}/*.tar.gz" > /dev/null \
+            || compgen -G "../blocknet-binaries/${{ matrix.host }}/*.zip" > /dev/null \
+            || compgen -G "../blocknet-binaries/${{ matrix.host }}/*.dmg" > /dev/null \
+            || compgen -G "../blocknet-binaries/${{ matrix.host }}/*.exe" > /dev/null \
+            || { echo "no artifact for ${{ matrix.host }} — FAIL"; exit 1; }
 
-      - name: Upload Guix artifacts
+      - name: Stage host artifacts
+        run: |
+          # One dir per host so merged downloads keep the
+          # <host>/* layout the docker and release jobs expect.
+          mkdir -p release-staging/${{ matrix.host }}
+          cp -a blocknet-binaries/${{ matrix.host }}/. release-staging/${{ matrix.host }}/
+          cp /tmp/guix-${{ matrix.host }}.log release-staging/${{ matrix.host }}/
+          ls -R release-staging | head -n 20
+
+      - name: Upload Guix artifacts (${{ matrix.host }})
         uses: actions/upload-artifact@v6
         with:
-          name: blocknet-guix-${{ steps.ver.outputs.version }}
+          name: blocknet-guix-${{ needs.setup.outputs.version }}-${{ matrix.host }}
           path: release-staging
           if-no-files-found: error
           retention-days: 14
@@ -117,7 +148,7 @@ jobs:
   # Docker multi-arch — FROM ubuntu:22.04 (glibc 2.35 floor), not bionic/24.04
   # ──────────────────────────────────────────────────────────────
   docker:
-    needs: guix-build
+    needs: [setup, guix-build]
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     permissions:
@@ -131,7 +162,8 @@ jobs:
       - name: Download Guix artifacts (into the build context)
         uses: actions/download-artifact@v6
         with:
-          name: blocknet-guix-${{ needs.guix-build.outputs.version }}
+          pattern: blocknet-guix-${{ needs.setup.outputs.version }}-*
+          merge-multiple: true
           path: blocknet/blocknet-binaries
 
       - name: List binaries
@@ -189,7 +221,7 @@ jobs:
           sbom: true
 
   github-release:
-    needs: [guix-build, docker]
+    needs: [setup, guix-build, docker]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 30
@@ -197,8 +229,14 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v6
         with:
-          name: blocknet-guix-${{ needs.guix-build.outputs.version }}
+          pattern: blocknet-guix-${{ needs.setup.outputs.version }}-*
+          merge-multiple: true
           path: artifacts
+
+      - name: Build SHA256SUMS
+        run: |
+          find artifacts -type f ! -name SHA256SUMS -exec sha256sum {} \; | sort -k2 > artifacts/SHA256SUMS
+          cat artifacts/SHA256SUMS
 
       - name: Verify artifacts present
         run: |

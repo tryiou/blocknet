@@ -97,6 +97,13 @@ time-machine() {
 # Set common variables
 ################
 
+# Substitute servers, bordeaux first: ci.guix.gnu.org repeatedly stalls
+# ("server is somewhat slow"), and those stalls can trip the upstream
+# display-download-progress crash (guix #38493/#55337) on any large
+# download. Both servers are in Guix's default authorized keys, so this
+# only changes preference order. Overridable via environment.
+SUBSTITUTE_URLS="${SUBSTITUTE_URLS:-https://bordeaux.guix.gnu.org https://ci.guix.gnu.org}"
+
 VERSION="${FORCE_VERSION:-$(git_head_version)}"
 DISTNAME="${DISTNAME:-blocknet-${VERSION}}"
 
